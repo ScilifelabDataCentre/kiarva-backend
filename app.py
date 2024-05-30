@@ -8,13 +8,13 @@ from flask_cors import CORS
 
 from db import db
 
-from resources.articles import blp as ArticleBlueprint
+from resources.immunediscoverdata import blp as ImmuneDiscoverDataBlueprint
 
 def create_app(db_url=None):
     load_dotenv(override=True)
 
     app = Flask(__name__)
-    CORS(app, origins=[os.getenv("FRONTEND_URL")])
+    # CORS(app, origins=[os.getenv("FRONTEND_URL")])
 
     app.config["PROPAGATE_EXCEPTIONS"] = True
     app.config["API_TITLE"] = "Precision Medicine Portal REST API"
@@ -30,6 +30,6 @@ def create_app(db_url=None):
     migrate = Migrate(app, db)
     api = Api(app)
 
-    api.register_blueprint(ArticleBlueprint)
+    api.register_blueprint(ImmuneDiscoverDataBlueprint)
 
     return app

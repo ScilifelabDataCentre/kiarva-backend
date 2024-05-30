@@ -15,23 +15,3 @@ def write_fastas(df, output_dir):
         f = open(output_dir + seq_type + '.fasta', 'w')
         f.write(df_to_fasta(df, 'db_name', 'sequence', seq_type))
         f.close()
-
-
-def main():
-    data_in_dir = ROOT_DIR + "/data/in/"
-    data_out_dir = ROOT_DIR + "/data/out/"
-
-    file_name = '1KGP_ImmuneDiscover_IGHV1-2.tsv'
-
-    df = pd.read_csv(data_in_dir + file_name,sep='\t')
-
-    print(df.dtypes)
-    print(df[df.columns[:5]].head())
-    print()
-    print(df[df.columns[5:10]].head())
-    print()
-    print(df[df.columns[10:15]].head())
-    # write_fastas(df, data_out_dir)
-
-
-main()

@@ -1,15 +1,24 @@
 from marshmallow import Schema, fields
 
-class PlainArticleSchema(Schema):
+class ImmuneDiscoverDataGetSchema(Schema):
+    case = fields.Str(required = True)
+    db_name = fields.Str(required = True)
+    sequence = fields.Str(required=True)
+
+class ImmuneDiscoverDataUploadSchema(Schema):
     id = fields.Str(dump_only=True)
-    title = fields.Str(required=True)
-    markdown_text = fields.Str(required=True)
-
-class ArticleGetSchema(PlainArticleSchema):
-    url_str = fields.Str(required=True)
-    is_available = fields.Bool(required=True)
-
-class ArticleUpdateSchema(Schema):
-    title = fields.Str()
-    url_str = fields.Str()
-    markdown_text = fields.Str()
+    well = fields.Str()
+    case = fields.Str(required = True)
+    db_name = fields.Str(required = True)
+    sequence = fields.Str(required=True)
+    heptamer = fields.Str(required = False)
+    prefix = fields.Str(required = False)
+    full_count = fields.Str()
+    count = fields.Str(required=True)
+    gene = fields.Str(required = True)
+    full_frequency = fields.Str()
+    frequency = fields.Str()
+    flank_index = fields.Str()
+    log2_count = fields.Str()
+    file = fields.Str()
+    load_tsv_metadata = fields.Str(required = True)
