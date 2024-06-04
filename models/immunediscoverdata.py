@@ -21,3 +21,5 @@ class ImmuneDiscoverDataModel(db.Model):
     flank_index = db.Column(db.Integer, nullable = True)
     log2_count = db.Column(db.Float, nullable = True)
     file = db.Column(db.String(80), nullable = True)
+    loaded_from_tsv = db.Column(db.String(80), nullable = False)
+    loaded_at = db.Column(db.String(80), nullable = False)

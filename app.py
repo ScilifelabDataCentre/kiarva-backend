@@ -8,6 +8,7 @@ from flask_cors import CORS
 from sqlalchemy import column
 from sqlalchemy.exc import OperationalError
 
+from constants import ROOT_DIR
 from db import db
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
@@ -36,11 +37,19 @@ def create_app(db_url=None):
 
     api.register_blueprint(ImmuneDiscoverDataBlueprint)
 
+    # loads tsv data to db only if db is initialized and upgraded and tsv data has not been loaded yet
     with app.app_context():
+        data_dir = ROOT_DIR + "/data/in/"
+        tsv_files = [file for file in os.listdir(data_dir) if file.endswith('.tsv')]
+
         try:
-            data = ImmuneDiscoverDataModel.query.all()
-            if len(data) == 0:
-                load_tsv_to_db()
+            files_in_db = ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.loaded_from_tsv).distinct().all()
+
+            loaded_files = [loaded_file[0] for loaded_file in files_in_db]
+                    
+            for file in tsv_files:
+                if file not in loaded_files:
+                    load_tsv_to_db(file)
         except OperationalError:
             print("---DB not initialized---")
 
