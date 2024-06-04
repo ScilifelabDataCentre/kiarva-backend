@@ -21,4 +21,3 @@ class ImmuneDiscoverDataUploadSchema(Schema):
     flank_index = fields.Str()
     log2_count = fields.Str()
     file = fields.Str()
-    load_tsv_metadata = fields.Str(required = True)

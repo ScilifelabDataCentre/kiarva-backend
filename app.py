@@ -5,10 +5,14 @@ from flask import Flask
 from flask_smorest import Api
 from flask_migrate import Migrate
 from flask_cors import CORS
+from sqlalchemy import column
+from sqlalchemy.exc import OperationalError
 
 from db import db
 
+from models.immunediscoverdata import ImmuneDiscoverDataModel
 from resources.immunediscoverdata import blp as ImmuneDiscoverDataBlueprint
+from utils import load_tsv_to_db
 
 def create_app(db_url=None):
     load_dotenv(override=True)
@@ -31,5 +35,13 @@ def create_app(db_url=None):
     api = Api(app)
 
     api.register_blueprint(ImmuneDiscoverDataBlueprint)
+
+    with app.app_context():
+        try:
+            data = ImmuneDiscoverDataModel.query.all()
+            if len(data) == 0:
+                load_tsv_to_db()
+        except OperationalError:
+            print("---DB not initialized---")
 
     return app
