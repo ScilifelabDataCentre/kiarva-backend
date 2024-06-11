@@ -129,4 +129,4 @@ env.bak/
 venv.bak/
 
 # Project specific
-data/out/
+data/out/*.fasta
