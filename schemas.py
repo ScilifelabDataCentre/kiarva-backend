@@ -23,3 +23,6 @@ class ImmuneDiscoverDataUploadSchema(Schema):
     file = fields.Str()
     loaded_from_tsv = fields.Str(required = True)
     loaded_at = fields.Str(required = True)
+
+class ImmuneDiscoverFastaSchema(Schema):
+    content = fields.Str(required = True)

@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db import db
 from models import ImmuneDiscoverDataModel
-from schemas import ImmuneDiscoverDataGetSchema, ImmuneDiscoverDataUploadSchema
+from schemas import ImmuneDiscoverDataGetSchema, ImmuneDiscoverDataUploadSchema, ImmuneDiscoverFastaSchema
 
 from security import api_key_required
 from utils import load_tsv_to_db
@@ -24,3 +24,10 @@ class ImmuneDiscoverDataList(MethodView):
         # for row in data:
         #     data_out.append({'case': row.case, 'db_name': row.db_name, 'sequence': row.sequence})
         return data
+    
+@blp.route("/data/fastas/<fasta_type>")
+class ImmuneDiscoverFasta(MethodView):
+    @blp.response(200, ImmuneDiscoverFastaSchema())
+    def get(self):
+        data = ImmuneDiscoverDataModel.query.all()
+        
