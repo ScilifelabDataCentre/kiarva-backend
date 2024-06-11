@@ -24,5 +24,7 @@ class ImmuneDiscoverDataUploadSchema(Schema):
     loaded_from_tsv = fields.Str(required = True)
     loaded_at = fields.Str(required = True)
 
-class ImmuneDiscoverFastaSchema(Schema):
-    content = fields.Str(required = True)
+class ImmuneDiscoverDataFrequencySchema(Schema):
+    population = fields.Str()
+    frequency = fields.Float()
+    n = fields.Int()

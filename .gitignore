@@ -129,4 +129,5 @@ env.bak/
 venv.bak/
 
 # Project specific
+migrations/
 data/out/*.fasta
