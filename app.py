@@ -39,6 +39,7 @@ def create_app(db_url=None):
     api.register_blueprint(ImmuneDiscoverDataBlueprint)
 
     # loads tsv data to db only if db is initialized and upgraded and tsv data has not been loaded yet
+    # writes fasta files from db data to /data/out/ once db is loaded
     with app.app_context():
         data_dir = ROOT_DIR + '/data/'
         tsv_files = [file for file in os.listdir(data_dir+'in/') if file.endswith('.tsv')]
