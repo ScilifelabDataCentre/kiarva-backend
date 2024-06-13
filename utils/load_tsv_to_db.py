@@ -3,6 +3,7 @@ from datetime import datetime
 from db import db
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
+from sqlalchemy.exc import IntegrityError
 
 
 
@@ -21,4 +22,10 @@ def load_tsv_to_db(file_name):
 
         for row in immune_discover_data:
             db.session.add(row)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError as e:
+            db.session.rollback()
+            print(e)
+            print("!!!--------" + file_name + " contains duplicate values of current db instance. " + file_name + " Not loaded--------!!!")
+            quit()

@@ -1,11 +1,6 @@
 from marshmallow import Schema, fields
 
-class ImmuneDiscoverDataGetSchema(Schema):
-    case = fields.Str(required = True)
-    db_name = fields.Str(required = True)
-    sequence = fields.Str(required=True)
-
-class ImmuneDiscoverDataUploadSchema(Schema):
+class ImmuneDiscoverDataGetAllSchema(Schema):
     id = fields.Str(dump_only=True)
     well = fields.Str()
     case = fields.Str(required = True)

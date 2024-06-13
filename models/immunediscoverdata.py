@@ -1,3 +1,4 @@
+from sqlalchemy import UniqueConstraint
 from db import db
 
 class ImmuneDiscoverDataModel(db.Model):
@@ -23,3 +24,4 @@ class ImmuneDiscoverDataModel(db.Model):
     file = db.Column(db.String(80), nullable = True)
     loaded_from_tsv = db.Column(db.String(80), nullable = False)
     loaded_at = db.Column(db.String(80), nullable = False)
+    __table_args__ = (UniqueConstraint('case', 'db_name','flank_index'),)

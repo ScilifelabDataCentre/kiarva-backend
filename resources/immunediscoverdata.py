@@ -5,7 +5,7 @@ from flask import send_from_directory
 
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
-from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataUploadSchema
+from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema
 
 # from security import api_key_required
 from utils import calculate_allele_frequencies
@@ -16,7 +16,7 @@ blp = Blueprint("ImmuneDiscoverData", __name__, description="Operations on Immun
 @blp.route("/data")
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
-    @blp.response(200, ImmuneDiscoverDataUploadSchema(many=True))
+    @blp.response(200, ImmuneDiscoverDataGetAllSchema(many=True))
     def get(self):
         data = ImmuneDiscoverDataModel.query.all()
         # data_out = []

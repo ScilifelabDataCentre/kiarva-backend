@@ -1,13 +1,13 @@
 import os
 from dotenv import load_dotenv
 
-from flask import Flask
+from flask import Flask, request
 from flask_smorest import Api
 from flask_migrate import Migrate
 from flask_cors import CORS
 import pandas as pd
 from sqlalchemy import column
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, IntegrityError
 
 from constants import ROOT_DIR
 from db import db
