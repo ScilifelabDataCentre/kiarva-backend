@@ -1,1 +1,1 @@
-from models.article import ArticleModel
+from models.immunediscoverdata import ImmuneDiscoverDataModel
