@@ -1,7 +1,6 @@
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
 # from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from flask import send_from_directory
 from flask import send_file
 
 from constants import ROOT_DIR
