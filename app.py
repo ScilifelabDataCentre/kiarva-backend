@@ -21,6 +21,7 @@ def create_app(db_url=None):
 
     app = Flask(__name__)
     # CORS(app, origins=[os.getenv("FRONTEND_URL")])
+    CORS(app, origins=["*"])
 
     app.config["PROPAGATE_EXCEPTIONS"] = True
     app.config["API_TITLE"] = "Precision Medicine Portal REST API"
@@ -31,6 +32,7 @@ def create_app(db_url=None):
     app.config["OPENAPI_SWAGGER_UI_URL"] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url or os.getenv("DATABASE_URL", "sqlite:///data.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["FASTA_DIR"] = ROOT_DIR + "/data/out/"
 
     db.init_app(app)
     migrate = Migrate(app, db)

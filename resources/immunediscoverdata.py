@@ -1,7 +1,8 @@
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
 # from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from flask import send_from_directory
+from flask import current_app, send_file
+from werkzeug.utils import safe_join
 
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
@@ -38,8 +39,8 @@ class ImmuneDiscoverDataList(MethodView):
     def get(self, allele_name):
         return calculate_allele_frequencies(allele_name)
     
-@blp.route("/fastas/<file_name>")
+@blp.route("/fasta/<file_name>")
 def send_fasta(file_name):
-    data_out_path = ROOT_DIR + '/data/out/'
-    return send_from_directory(data_out_path, file_name)
+    file_path = safe_join(current_app.config['FASTA_DIR'], file_name)
+    return send_file(file_path, as_attachment=True)
         
