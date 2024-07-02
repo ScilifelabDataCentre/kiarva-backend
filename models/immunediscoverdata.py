@@ -22,6 +22,8 @@ class ImmuneDiscoverDataModel(db.Model):
     flank_index = db.Column(db.Integer, nullable = True)
     log2_count = db.Column(db.Float, nullable = True)
     file = db.Column(db.String(80), nullable = True)
+    superpopulation = db.Column(db.String(20), nullable = False)
+    population = db.Column(db.String(20), nullable = False)
     loaded_from_tsv = db.Column(db.String(80), nullable = False)
     loaded_at = db.Column(db.String(80), nullable = False)
     __table_args__ = (UniqueConstraint('case', 'db_name','flank_index'),)

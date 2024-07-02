@@ -20,9 +20,6 @@ class ImmuneDiscoverDataList(MethodView):
     @blp.response(200, ImmuneDiscoverDataGetAllSchema(many=True))
     def get(self):
         data = ImmuneDiscoverDataModel.query.all()
-        # data_out = []
-        # for row in data:
-        #     data_out.append({'case': row.case, 'db_name': row.db_name, 'sequence': row.sequence})
         return data
 
 @blp.route("/data/frequencies/superpopulations/<allele_name>")
@@ -30,14 +27,14 @@ class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
     def get(self, allele_name):        
-        return calculate_allele_frequencies(allele_name, True)
+        return calculate_allele_frequencies(allele_name, "superpopulation")
     
 @blp.route("/data/frequencies/populations/<allele_name>")
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
     def get(self, allele_name):
-        return calculate_allele_frequencies(allele_name)
+        return calculate_allele_frequencies(allele_name, "population")
     
 @blp.route("/fasta/<file_name>")
 def send_fasta(file_name):

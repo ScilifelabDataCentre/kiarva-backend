@@ -56,6 +56,8 @@ def create_app(db_url=None):
                     load_tsv_to_db(file)
             
             df = pd.read_sql_table('immunediscoverdata', db.engine)
+            if not os.path.exists(data_dir +'out/'):
+                os.makedirs(data_dir +'out/')
             write_fastas(df, data_dir +'out/')
         except OperationalError:
             print("---DB not initialized---")
