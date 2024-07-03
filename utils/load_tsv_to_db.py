@@ -16,6 +16,9 @@ def load_tsv_to_db(file_name):
 
         immune_discover_data = []
         for row in tsvreader:
+            population_data_split = row["case"].split("_")
+            row["superpopulation"] = population_data_split[2]
+            row["population"] = population_data_split[1]
             row["loaded_from_tsv"] = file_name
             row["loaded_at"] = str(datetime.now())
             immune_discover_data.append(ImmuneDiscoverDataModel(**row))

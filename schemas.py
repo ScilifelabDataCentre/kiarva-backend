@@ -16,6 +16,8 @@ class ImmuneDiscoverDataGetAllSchema(Schema):
     flank_index = fields.Str()
     log2_count = fields.Str()
     file = fields.Str()
+    superpopulation = fields.Str(required = True)
+    population = fields.Str(required = True)
     loaded_from_tsv = fields.Str(required = True)
     loaded_at = fields.Str(required = True)
 
