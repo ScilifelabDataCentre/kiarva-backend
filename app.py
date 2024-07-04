@@ -14,7 +14,7 @@ from db import db
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from resources.immunediscoverdata import blp as ImmuneDiscoverDataBlueprint
-from utils import load_tsv_to_db, write_fastas
+from utils import load_tsv_to_db
 
 def create_app(db_url=None):
     load_dotenv(override=True)
@@ -54,11 +54,6 @@ def create_app(db_url=None):
             for file in tsv_files:
                 if file not in loaded_files:
                     load_tsv_to_db(file)
-            
-            df = pd.read_sql_table('immunediscoverdata', db.engine)
-            if not os.path.exists(data_dir +'out/'):
-                os.makedirs(data_dir +'out/')
-            write_fastas(df, data_dir +'out/')
         except OperationalError:
             print("---DB not initialized---")
 
