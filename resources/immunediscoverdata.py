@@ -6,7 +6,7 @@ from werkzeug.utils import safe_join
 
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
-from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema
+from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema, ImmuneDiscoverPopulationRegionSchema
 
 # from security import api_key_required
 from utils import calculate_allele_frequencies
@@ -35,6 +35,17 @@ class ImmuneDiscoverDataList(MethodView):
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
     def get(self, allele_name):
         return calculate_allele_frequencies(allele_name, "population")
+    
+@blp.route("/data/populationregions")
+class ImmuneDiscoverPopulationDataList(MethodView):
+    # @api_key_required
+    @blp.response(200, ImmuneDiscoverPopulationRegionSchema(many=True))
+    def get(self):
+        data = ImmuneDiscoverDataModel.query.with_entities(
+                ImmuneDiscoverDataModel.superpopulation,
+                ImmuneDiscoverDataModel.population,
+                ).distinct().all()
+        return data
     
 @blp.route("/fasta/<file_name>")
 def send_fasta(file_name):
