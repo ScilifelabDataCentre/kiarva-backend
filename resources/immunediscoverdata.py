@@ -11,7 +11,7 @@ from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllS
 
 # from security import api_key_required
 from utils import calculate_allele_frequencies
-from utils.generate_fasta import table_to_fasta
+from utils.generate_fasta import generate_fasta
 
 
 blp = Blueprint("ImmuneDiscoverData", __name__, description="Operations on ImmuneDiscover Data")
@@ -61,11 +61,22 @@ class ImmuneDiscoverPopulationDataList(MethodView):
 def send_fasta(file_name):
     # send_file expects bytes rather than str
     buffer = BytesIO()
-    buffer.write(str.encode(table_to_fasta(file_name)))
+    buffer.write(str.encode(generate_fasta(file_name)))
     buffer.seek(0)
     return send_file(
         buffer,
         as_attachment=True,
         download_name=file_name + '.fasta'
     )
-        
+
+@blp.route("/fasta/genomic/<file_name>")
+def send_fasta(file_name):
+    # send_file expects bytes rather than str
+    buffer = BytesIO()
+    buffer.write(str.encode(generate_fasta(file_name, genomic=True)))
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=file_name + '_genomic.fasta'
+    )   
