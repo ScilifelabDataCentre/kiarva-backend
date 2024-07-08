@@ -25,3 +25,7 @@ class ImmuneDiscoverDataFrequencySchema(Schema):
     population = fields.Str()
     frequency = fields.Float()
     n = fields.Int()
+
+class ImmuneDiscoverPopulationRegionSchema(Schema):
+    superpopulation = fields.Str()
+    population = fields.Str()
