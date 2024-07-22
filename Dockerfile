@@ -1,4 +1,5 @@
 FROM python:3.11
+ENV PYTHONUNBUFFERED=1
 EXPOSE 5000
 WORKDIR /app
 COPY requirements.txt .
