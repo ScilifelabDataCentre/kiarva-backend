@@ -1,4 +1,5 @@
 from io import BytesIO
+import time
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
 # from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -36,15 +37,27 @@ class ImmuneDiscoverDataList(MethodView):
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
-    def get(self, allele_name):        
-        return calculate_allele_frequencies(allele_name, "superpopulation")
+    def get(self, allele_name):
+        print("---")
+        time_start = time.time()
+        data_out = calculate_allele_frequencies(allele_name, "superpopulation")
+        time_end = time.time()
+        print("superpopulations frequency calc delta: " + str((time_end-time_start)*1000) + " ms")
+        print("---")
+        return data_out
     
 @blp.route("/data/frequencies/populations/<allele_name>")
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
     def get(self, allele_name):
-        return calculate_allele_frequencies(allele_name, "population")
+        print("---")
+        time_start = time.time()
+        data_out = calculate_allele_frequencies(allele_name, "population")
+        time_end = time.time()
+        print("subpopulations frequency calc delta: " + str((time_end-time_start)*1000) + " ms")
+        print("---")
+        return data_out
     
 @blp.route("/data/populationregions")
 class ImmuneDiscoverPopulationDataList(MethodView):

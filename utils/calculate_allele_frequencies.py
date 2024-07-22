@@ -1,4 +1,5 @@
 from collections import Counter, OrderedDict
+import time
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 
 # calculate the frequency that an allele appears in a population, alt a superpopulation
@@ -45,6 +46,7 @@ def calculate_allele_frequencies(allele_name, population_type):
     else:
         pop_order = subpopulation_order
 
+    db_fetch_time_start = time.time()
     cases = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.case,
         getattr(ImmuneDiscoverDataModel, population_type)
@@ -54,7 +56,10 @@ def calculate_allele_frequencies(allele_name, population_type):
         getattr(ImmuneDiscoverDataModel, population_type),
         ImmuneDiscoverDataModel.db_name
         ).where(ImmuneDiscoverDataModel.db_name == allele_name).distinct().all()
+    db_fetch_time_stop = time.time()
+    print("db fetch delta: " + str((db_fetch_time_stop-db_fetch_time_start)*1000) + " ms")
 
+    count_and_order_operation_time_start = time.time()
     populations = [col[1] for col in cases]
     populations_with_allele = [col[1] for col in cases_with_allele]
     pop_count = Counter(populations)
@@ -71,5 +76,7 @@ def calculate_allele_frequencies(allele_name, population_type):
                     'n': pop_with_allele_count[pop],
                     'frequency': pop_with_allele_count[pop]/pop_count[pop]
                 })
+    count_and_order_operation_time_stop = time.time()
+    print("counting and ordering delta: " + str((count_and_order_operation_time_stop-count_and_order_operation_time_start)*1000) + " ms")
     
     return data_out
