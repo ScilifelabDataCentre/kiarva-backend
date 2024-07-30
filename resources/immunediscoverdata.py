@@ -72,13 +72,16 @@ def get_next_selection_option(gene):
             next_selection = row[0][len(gene):]
             if '*' in next_selection:
                 next_selection = next_selection.split('*', 1)[0]
+            else:
+                next_selection = '*' + next_selection
             data_out.append(next_selection)
     except IndexError as e:
         print(e)
-        return []
+        return [{}]
 
     data_out = list(set(data_out))
     data_out.sort()
+    print(data_out)
     return data_out
 
 @blp.route("/fasta/<file_name>")
