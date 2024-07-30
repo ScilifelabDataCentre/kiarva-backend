@@ -61,11 +61,13 @@ class ImmuneDiscoverPopulationDataList(MethodView):
         return data
     
 
-@blp.route("/data/plotoptions/<gene>")
+@blp.route("/data/plotoptions/<gene>", methods=["GET"])
 def get_next_selection_option(gene):
     data = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.db_name
         ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene+'%')).all()
+    if not data:
+        return []
     data_out = []
     try:
         for row in data:
@@ -77,7 +79,7 @@ def get_next_selection_option(gene):
             data_out.append(next_selection)
     except IndexError as e:
         print(e)
-        return [{}]
+        return []
 
     data_out = list(set(data_out))
     data_out.sort()
