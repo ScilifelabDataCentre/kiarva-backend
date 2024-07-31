@@ -63,11 +63,11 @@ class ImmuneDiscoverPopulationDataList(MethodView):
 
 @blp.route("/data/plotoptions/<gene>", methods=["GET"])
 def get_next_selection_option(gene):
+    if not gene or not gene[0].isalpha():
+        return []
     data = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.db_name
         ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene+'%')).all()
-    if not data:
-        return []
     data_out = []
     try:
         for row in data:
@@ -83,7 +83,6 @@ def get_next_selection_option(gene):
 
     data_out = list(set(data_out))
     data_out.sort()
-    print(data_out)
     return data_out
 
 @blp.route("/fasta/<file_name>")
