@@ -17,6 +17,8 @@ def load_tsv_to_db(file_name):
         immune_discover_data = []
         for row in tsvreader:
             population_data_split = row["case"].split("_")
+            if not row["IgSNPer_uncommon"]:
+                row["IgSNPer_uncommon"] = None
             row["superpopulation"] = population_data_split[2]
             row["population"] = population_data_split[1]
             row["loaded_from_tsv"] = file_name
