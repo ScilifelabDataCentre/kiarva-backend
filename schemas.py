@@ -29,3 +29,6 @@ class ImmuneDiscoverDataFrequencySchema(Schema):
 class ImmuneDiscoverPopulationRegionSchema(Schema):
     superpopulation = fields.Str()
     population = fields.Str()
+
+class ImmuneDiscoverPlotSelectionSchema(Schema):
+    next_selection = fields.Str()

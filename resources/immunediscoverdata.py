@@ -1,4 +1,5 @@
 from io import BytesIO
+import time
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
 # from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -7,7 +8,7 @@ from werkzeug.utils import safe_join
 
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
-from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema, ImmuneDiscoverPopulationRegionSchema
+from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema, ImmuneDiscoverPlotSelectionSchema, ImmuneDiscoverPopulationRegionSchema
 
 # from security import api_key_required
 from utils import calculate_allele_frequencies
@@ -36,15 +37,17 @@ class ImmuneDiscoverDataList(MethodView):
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
-    def get(self, allele_name):        
-        return calculate_allele_frequencies(allele_name, "superpopulation")
+    def get(self, allele_name):
+        data_out = calculate_allele_frequencies(allele_name, "superpopulation")
+        return data_out
     
 @blp.route("/data/frequencies/populations/<allele_name>")
 class ImmuneDiscoverDataList(MethodView):
     # @api_key_required
     @blp.response(200, ImmuneDiscoverDataFrequencySchema(many=True))
     def get(self, allele_name):
-        return calculate_allele_frequencies(allele_name, "population")
+        data_out = calculate_allele_frequencies(allele_name, "population")
+        return data_out
     
 @blp.route("/data/populationregions")
 class ImmuneDiscoverPopulationDataList(MethodView):
@@ -56,6 +59,31 @@ class ImmuneDiscoverPopulationDataList(MethodView):
                 ImmuneDiscoverDataModel.population,
                 ).distinct().all()
         return data
+    
+
+@blp.route("/data/plotoptions/<gene>", methods=["GET"])
+def get_next_selection_option(gene):
+    if not gene or not gene[0].isalpha():
+        return []
+    data = ImmuneDiscoverDataModel.query.with_entities(
+        ImmuneDiscoverDataModel.db_name
+        ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene+'%')).all()
+    data_out = []
+    try:
+        for row in data:
+            next_selection = row[0][len(gene):]
+            if '*' in next_selection:
+                next_selection = next_selection.split('*', 1)[0]
+            else:
+                next_selection = '*' + next_selection
+            data_out.append(next_selection)
+    except IndexError as e:
+        print(e)
+        return []
+
+    data_out = list(set(data_out))
+    data_out.sort()
+    return data_out
 
 @blp.route("/fasta/<file_name>")
 def send_fasta(file_name):
