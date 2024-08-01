@@ -33,3 +33,6 @@ class ImmuneDiscoverPopulationRegionSchema(Schema):
 class ImmuneDiscoverIgSNPerDataSchema(Schema):
     igSNPer_score = fields.Float()
     igSNPer_SNPs = fields.List(fields.Str())
+
+class ImmuneDiscoverPlotSelectionSchema(Schema):
+    next_selection = fields.Str()
