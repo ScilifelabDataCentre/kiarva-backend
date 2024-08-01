@@ -8,11 +8,12 @@ from werkzeug.utils import safe_join
 
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
-from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema, ImmuneDiscoverPopulationRegionSchema
+from schemas import ImmuneDiscoverDataFrequencySchema, ImmuneDiscoverDataGetAllSchema, ImmuneDiscoverIgSNPerDataSchema, ImmuneDiscoverPopulationRegionSchema
 
 # from security import api_key_required
 from utils import calculate_allele_frequencies
 from utils.generate_fasta import generate_fasta
+from utils.igSNPer_data import get_igSNPer_data
 
 
 blp = Blueprint("ImmuneDiscoverData", __name__, description="Operations on ImmuneDiscover Data")
@@ -59,6 +60,14 @@ class ImmuneDiscoverDataList(MethodView):
         print("---")
         return data_out
     
+@blp.route("/data/igsnperdata/<allele_name>")
+class ImmuneDiscoverDataList(MethodView):
+    # @api_key_required
+    @blp.response(200, ImmuneDiscoverIgSNPerDataSchema)
+    def get(self, allele_name):
+        data_out = get_igSNPer_data(allele_name)
+        return data_out
+    
 @blp.route("/data/populationregions")
 class ImmuneDiscoverPopulationDataList(MethodView):
     # @api_key_required
@@ -92,4 +101,4 @@ def send_fasta(file_name):
         buffer,
         as_attachment=True,
         download_name=file_name + '_genomic.fasta'
-    )   
+    )

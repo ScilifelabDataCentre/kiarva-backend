@@ -1,3 +1,4 @@
 from utils.load_tsv_to_db import load_tsv_to_db
 from utils.generate_fasta import generate_fasta
 from utils.calculate_allele_frequencies import calculate_allele_frequencies
+from utils.igSNPer_data import get_igSNPer_data

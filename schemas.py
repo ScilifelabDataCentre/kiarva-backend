@@ -29,3 +29,7 @@ class ImmuneDiscoverDataFrequencySchema(Schema):
 class ImmuneDiscoverPopulationRegionSchema(Schema):
     superpopulation = fields.Str()
     population = fields.Str()
+
+class ImmuneDiscoverIgSNPerDataSchema(Schema):
+    igSNPer_score = fields.Float()
+    igSNPer_SNPs = fields.List(fields.Str())
