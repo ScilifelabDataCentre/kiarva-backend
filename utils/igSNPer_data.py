@@ -9,6 +9,9 @@ def get_igSNPer_data(allele_name):
     ImmuneDiscoverDataModel.db_name
     ).where(ImmuneDiscoverDataModel.db_name == allele_name).distinct().all()
 
+    if len(igSNPer_data) == 0:
+        return {'igSNPer_score': None, 'igSNPer_SNPs': []}
+    
     igSNPer_score = igSNPer_data[0][0]
     
     if len(igSNPer_data[0][1]) > 0:
