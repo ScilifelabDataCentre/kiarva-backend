@@ -68,6 +68,10 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+# Windows stuff:
+Scripts/
+pyvenv.cfg
+
 # Sphinx documentation
 docs/_build/
 
