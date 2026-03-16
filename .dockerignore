@@ -1,0 +1,10 @@
+__pycache__/
+.github/
+instance/
+.venv/
+.env
+data/in/
+tmp/
+tests/
+README.md
+LICENSE

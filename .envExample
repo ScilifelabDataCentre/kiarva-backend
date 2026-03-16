@@ -1,0 +1,3 @@
+# The request header from the frontend will contain an 'X-api-key' which 
+# must match with this key to allow API operations
+API_KEY = ""
