@@ -10,6 +10,8 @@ from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
 from sqlalchemy.exc import IntegrityError
 from flask import current_app
+from zipfile import ZipFile
+import pyzipper
 
 validation_schema = {
     "cohort": str,
@@ -80,11 +82,39 @@ def validate_row(row_num, data):
         if v is None and not isinstance(expected, tuple):
             print(f"[Row {row_num}] {k} is None, expected {expected.__name__}")
 
-
+# tsv_files are compressed in repo, unpack them before loading.
+# Note: Prepub data (not yet published data) is compressed with password protection,
+# unlocked in k8s using sealed secret.
+def unpack_compressed_tsv_files(data_dir):
+    zip_pass = os.getenv("ZIP_PASSWORD")
+    file_path_to_unzip = data_dir + 'compressed/tsv_files'
+    if zip_pass:
+        file_path_to_unzip += '-prepub.zip'
+    else:
+        file_path_to_unzip += '-prod.zip'
+    
+    with pyzipper.AESZipFile(file_path_to_unzip, 'r') as filezip:
+        if zip_pass:
+            filezip.setpassword(zip_pass.encode('utf-8'))
+        try:
+            for file in filezip.infolist(): # Iterate over the metadata (including filenames)
+                filezip.extract(file.filename, path=data_dir + 'in/')
+        except RuntimeError as e:
+            raise e
 
 # if db is set up - load all tsv files which have not yet been loaded
 def load_tsv_to_db():
-    data_in_dir = current_app.config.get("DATA_DIR") + 'in/'
+    data_dir = current_app.config.get("DATA_DIR")
+    try:
+        unpack_compressed_tsv_files(data_dir)
+    except FileNotFoundError as e:
+        print("Compressed tsv files missing, unable to load data.")
+        quit()
+    except RuntimeError as rte:
+        print(rte)
+        quit()
+        
+    data_in_dir = data_dir + 'in/'
     # get all tsv files from the current data/in dir
     tsv_files = [file for file in os.listdir(data_in_dir) if file.endswith('.tsv')]
 

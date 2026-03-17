@@ -1,12 +1,4 @@
-#unpacks zipped database
-FROM busybox AS unpack
-ARG DATASET="prod"
-WORKDIR /unpack
-COPY ./data/databases/tsv_files-${DATASET}.zip .
-RUN touch test.tsv && unzip ./tsv_files-${DATASET}.zip && mv ./tsv_files-${DATASET} ./tsv_files
-
 FROM python:3.11
-COPY --from=unpack /unpack/tsv_files/*.tsv .
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 5000
@@ -38,5 +30,5 @@ ENV MAFFT_BINARIES=""
 ENV PATH="/app/mafft/local/bin:$PATH"
 
 WORKDIR /app
-RUN mkdir ./data/in && mv /*.tsv ./data/in/ && rm -rf ./data/databases/ && chmod +x ./docker/entrypoint.sh
+RUN chmod +x ./docker/entrypoint.sh
 ENTRYPOINT ["./docker/entrypoint.sh"]
