@@ -10,6 +10,7 @@ from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
 from sqlalchemy.exc import IntegrityError
 from flask import current_app
+import pyzipper
 
 validation_schema = {
     "cohort": str,
@@ -80,13 +81,37 @@ def validate_row(row_num, data):
         if v is None and not isinstance(expected, tuple):
             print(f"[Row {row_num}] {k} is None, expected {expected.__name__}")
 
-
+# tsv_files are compressed in repo, unpack them before loading.
+# Note: Prepub data (not yet published data) is compressed with password protection,
+# will be unlocked in k8s using sealed secret.
+def unpack_compressed_tsv_files(data_dir):
+    paths_to_compressed_files = [data_dir + 'compressed/' + file for file in os.listdir(data_dir + 'compressed/') if file.endswith('.zip')]
+    zip_pass = os.getenv("ZIP_PASSWORD") or None
+    
+    for path in paths_to_compressed_files:
+        # using pyzipper instead of the native zipfile lib, due to the latter not supporting
+        # handling AES256-encrypted files
+        with pyzipper.AESZipFile(path, 'r') as filezip:
+            # if zip_pass was set using env variable, set it as password for current zipfile.
+            # Must be converted to byte-type using .encode('utf-8')
+            if zip_pass:
+                filezip.setpassword(zip_pass.encode('utf-8'))
+            try:
+                filezip.extractall(data_dir + 'in/')
+            except RuntimeError:
+                print("Password incorrect/not found for " + path)
 
 # if db is set up - load all tsv files which have not yet been loaded
 def load_tsv_to_db():
-    data_in_dir = current_app.config.get("DATA_DIR") + 'in/'
+    data_dir = current_app.config.get("DATA_DIR")
+    unpack_compressed_tsv_files(data_dir)
+        
+    data_in_dir = data_dir + 'in/'
     # get all tsv files from the current data/in dir
     tsv_files = [file for file in os.listdir(data_in_dir) if file.endswith('.tsv')]
+    if not tsv_files:
+        print("Missing tsv files, cannot load data.")
+        quit()
 
     print("Loading files: " + str(tsv_files))
 
