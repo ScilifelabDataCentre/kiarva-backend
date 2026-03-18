@@ -10,7 +10,6 @@ from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
 from sqlalchemy.exc import IntegrityError
 from flask import current_app
-from zipfile import ZipFile
 import pyzipper
 
 validation_schema = {
