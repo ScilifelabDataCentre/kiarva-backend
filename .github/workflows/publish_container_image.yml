@@ -50,8 +50,6 @@ jobs:
           push: true
           context: .
           file: ./docker/Dockerfile
-          build-args: |
-            DATASET=prod
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.metadata_action_id.outputs.tags }}
           labels: ${{ steps.metadata_action_id.outputs.labels }}
