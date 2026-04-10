@@ -3,7 +3,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
-      - 'dev'
+      - 'test'
 jobs:
   build_push_container:
     runs-on: ubuntu-latest
