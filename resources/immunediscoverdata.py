@@ -150,7 +150,6 @@ def get_aminoacid_list():
 @api_key_required
 def get_population_regions():
     data_out = get_populations()
-    print(data_out)
     return data_out
     
 

@@ -68,8 +68,9 @@ KIARVA Flask app
 ├── config.py
 ├── constants.py
 ├── data
-│   ├── databases
-│   │   └── tsv_files.zip
+│   ├── compressed
+│   │   ├── tsv_files-prepub.zip
+│   │   └── tsv_files-prod.zip
 ├── db.py
 ├── docker
 │   ├── Dockerfile
@@ -152,7 +153,7 @@ Under tests/ -
 
 #### Data & Dependencies
 
-* data/ - Contains input data used by the application. To save space we use a compressed dir of all given .tsv files that are then unpacked on startup. Since the data is currently unpublished, and we don’t have any secure private date storage at the Data Centre, we keep this file in a private repository as a bandaid solution.
+* data/compressed/ - Contains input data used by the application. The raw data consists of .tsv formated data provided by the Gunilla Hedestam research group. The data is compressed to decrease size. The file tsv_files-prod.zip contains the currently public data that is exposed in our production environment. The file tsv_files-prepub.zip contains data that is pre-publication and should not be available publically yet. Because of this, tsv_files-prepub.zip is encrypted. The reason it appears in the repository is so that we can expose it in a separate password protected environment for internal use of Gunilla Hedestam's group before publication.
 
 * mafft/ - Holds the MAFFT binary or source files used for sequence alignment. This is typically used internally by services/alignment.py.
 
