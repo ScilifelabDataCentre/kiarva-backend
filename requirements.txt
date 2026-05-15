@@ -23,7 +23,7 @@ Pygments==2.20.0
 pytest==9.0.3
 pytest-env==1.6.0
 python-dotenv==1.2.2
-pyzipper==0.3.6
+pyzipper==0.4.0
 SQLAlchemy==2.0.49
 typing_extensions==4.15.0
 webargs==8.7.1

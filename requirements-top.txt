@@ -11,4 +11,4 @@ gunicorn==26.0.0
 biopython==1.87
 pytest==9.0.3
 pytest-env==1.6.0
-pyzipper==0.3.6
+pyzipper==0.4.0
