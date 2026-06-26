@@ -1,4 +1,4 @@
-alembic==1.18.4
+alembic==1.18.5
 apispec==6.10.0
 biopython==1.87
 blinker==1.9.0
