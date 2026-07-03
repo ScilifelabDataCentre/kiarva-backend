@@ -25,6 +25,6 @@ pytest-env==1.6.0
 python-dotenv==1.2.2
 pyzipper==0.3.6
 SQLAlchemy==2.0.51
-typing_extensions==4.15.0
+typing_extensions==4.16.0
 webargs==8.7.1
 Werkzeug==3.1.8
