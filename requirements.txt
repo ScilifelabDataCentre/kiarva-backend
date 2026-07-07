@@ -20,7 +20,7 @@ packaging==26.2
 pluggy==1.6.0
 pycryptodomex==3.23.0
 Pygments==2.20.0
-pytest==9.1.0
+pytest==9.1.1
 pytest-env==1.6.0
 python-dotenv==1.2.2
 pyzipper==0.4.0
