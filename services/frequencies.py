@@ -105,7 +105,7 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
             allele_data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.db_name,
             ImmuneDiscoverDataModel.gene,
-            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(ImmuneDiscoverDataModel.db_name.notlike('%_F%')).distinct().all()
+            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).distinct().all()
 
             for item in allele_data:
                 alleles.append({'allele': item[0]})
