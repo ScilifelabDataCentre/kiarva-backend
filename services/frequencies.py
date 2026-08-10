@@ -98,24 +98,29 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
 
     alleles = []
 
-    # if full gene is requested, create a query to fetch 
+    # if full gene is requested, create a query to fetch
     # all alleles of that gene
+    # The gene column is filtered on but deliberately not selected: one allele can be
+    # stored under more than one gene value (a name like "IGHV3-30,IGHV3-30-5" and a
+    # plain "IGHV3-30"), and selecting it would make DISTINCT treat those as different
+    # alleles and repeat the allele in the table.
     if full_gene:
         if plot_type == "genomic":
             allele_data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.db_name,
-            ImmuneDiscoverDataModel.gene,
             ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).distinct().all()
 
             for item in allele_data:
                 alleles.append({'allele': item[0]})
-    
+
         elif plot_type == "aminoacid":
+            # db_name_AA_list is a property of db_name_AA, so a plain DISTINCT over the
+            # two of them returns one row per amino acid allele. DISTINCT ON is not an
+            # option here: it is PostgreSQL only, and is silently dropped on SQLite.
             allele_data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.db_name_AA,
             ImmuneDiscoverDataModel.db_name_AA_list,
-            ImmuneDiscoverDataModel.gene,
-            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(ImmuneDiscoverDataModel.db_name_AA != None).distinct(ImmuneDiscoverDataModel.db_name_AA).all()
+            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(ImmuneDiscoverDataModel.db_name_AA != None).distinct().all()
 
             for item in allele_data:
                 # split on second item to get aa_list in form ['aa1','aa2] instead of 'aa1,aa2'

@@ -263,7 +263,7 @@ def test_plotoptions_alleles(client):
 
     # Both genes of the two-gene db_name offer it as an allele, alongside their own.
     assert get(client, url("/data/plotoptions", current_selection="IGHV3-30*")).get_json() == [
-        "01", TWO_GENE_ALLELE,
+        "01", "02_S9143", TWO_GENE_ALLELE,
     ]
     assert get(client, url("/data/plotoptions", current_selection="IGHV3-30-5*")).get_json() == [
         "03_S1123", TWO_GENE_ALLELE,
@@ -398,3 +398,33 @@ def test_aminoacidfrequencies_table_gene(client):
         "['IGHV1-8*01', 'IGHV1-8*02', 'IGHV1-8*04']"
         f"\t{TEST_ALLELE}\tAFR\tAFR\t0.85714\t6"
     )
+
+
+def rows_per_allele(table, allele_column):
+    counts = {}
+    for row in table.split("\n")[1:]:
+        allele = row.split("\t")[allele_column]
+        counts[allele] = counts.get(allele, 0) + 1
+    return counts
+
+
+def test_gene_tables_list_each_allele_once(client):
+    # IGHV3-30 is the gene whose alleles are stored under more than one gene value:
+    # IGHV3-30*02/IGHV3-30-5*02 under "IGHV3-30,IGHV3-30-5" and IGHV3-30*02_S9143 under
+    # "IGHV3-30", both collapsing into the same amino acid allele. Selecting the gene
+    # column alongside them would make DISTINCT report that allele twice, once per gene
+    # value, and repeat its 30 rows in the downloaded table.
+    genomic = get(client, url("/data/frequencies/table/gene", gene_name="IGHV3-30"))
+    assert genomic.status_code == 200
+    assert rows_per_allele(genomic.get_data(as_text=True), 0) == {
+        "IGHV3-30*01": 30,
+        "IGHV3-30*02_S9143": 30,
+        TWO_GENE_ALLELE: 30,
+    }
+
+    aminoacid = get(client, url("/data/aminoacidfrequencies/table/gene", aa_gene_name="IGHV3-30"))
+    assert aminoacid.status_code == 200
+    assert rows_per_allele(aminoacid.get_data(as_text=True), 1) == {
+        "IGHV3-30*01": 30,
+        TWO_GENE_ALLELE: 30,
+    }
