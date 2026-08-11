@@ -7,11 +7,11 @@
 
 import os
 import subprocess
-from Bio.Seq import Seq
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from utils import dict_to_fasta_str, fasta_to_dict
 from utils.regex import plot_options_regex
+from utils.translation import translate
 
 # Script to apply mafft to a dict of sequences. MAFFT is run from command
 # line, expects a .fasta file input and gives .fasta file output, so we employ 
@@ -105,9 +105,8 @@ def translate_nt_to_aa(sequence):
                     seq_to_be_translated += current_triplet
 
     
-    # translate the processed nucleotide sequence using biopython's 'seq'
-    coding_dna = Seq(seq_to_be_translated)
-    translated_seq = str(coding_dna.translate())
+    # translate the processed nucleotide sequence using the standard genetic code
+    translated_seq = translate(seq_to_be_translated)
 
     # if we found a frameshift and broke out of the processing above
     # the string will be shortened and the rest of it will be filled with X

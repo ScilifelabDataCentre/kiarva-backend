@@ -104,10 +104,12 @@ KIARVA Flask app
 │   ├── conftest.py
 │   ├── generate_mock_data.py
 │   ├── mock_data/
-│   └── test_routes.py
+│   ├── test_routes.py
+│   └── test_translation.py
 └── utils
     ├── fasta_processing.py
-    └── progress_bar.py
+    ├── progress_bar.py
+    └── translation.py
 ```
 
 #### Top-Level Files
@@ -147,6 +149,7 @@ Uses Pytest with Flask and db fixtures.
 
 Under tests/ -
 * test_routes.py – Tests for API endpoints.
+* test_translation.py – Tests for the genetic code translation in utils/translation.py.
 * conftest.py – Shared test fixtures (e.g. test client, mock DB).
 * generate_mock_data.py – Generates mock inputs for testing. The dataset is kept minimal and deliberate: it uses real gene/allele naming and one row per edge case, each documented in the file. Run `python -m tests.generate_mock_data` after editing it to rewrite both mock_data/in/ and mock_data/compressed/.
 * mock_data/ – Static mock input files used by tests, in the same layout as data/: the tests unpack mock_data/compressed/ into mock_data/in/ the same way production unpacks the real data, so the .zip is the file that is actually loaded.
