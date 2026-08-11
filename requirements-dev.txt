@@ -1,0 +1,11 @@
+# Development and CI dependencies: everything needed to run the test suite, on
+# top of the runtime dependencies. The container image installs only
+# requirements.txt, so nothing listed here ships to production.
+-r requirements.txt
+
+iniconfig==2.3.0
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.1.1
+pytest-env==1.7.0
+python-dotenv==1.2.2

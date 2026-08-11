@@ -1,6 +1,10 @@
 FROM python:3.14
 
 ENV PYTHONUNBUFFERED=1
+# Set explicitly rather than relying on .flaskenv, which the Flask CLI only
+# reads when python-dotenv is installed. That is a test-only dependency and is
+# not part of the runtime image.
+ENV FLASK_APP=app
 EXPOSE 5000
 WORKDIR /app
 

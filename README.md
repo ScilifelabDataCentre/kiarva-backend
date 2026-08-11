@@ -91,6 +91,7 @@ KIARVA Flask app
 │   ├── plot_options.py
 │   └── population.py
 ├── requirements.txt
+├── requirements-dev.txt
 ├── resources
 │   └── immunediscoverdata.py
 ├── schemas.py
@@ -122,7 +123,9 @@ KIARVA Flask app
 * security.py – Authentication and access control logic, if used.
 * pytest.ini – Configuration for Pytest.
 * README.md – Project documentation.
-* requirements.txt – Python dependencies.
+* requirements.txt – Version-locked runtime Python dependencies (what the container installs).
+* requirements-dev.txt – Runtime dependencies plus test tooling, for local development and CI.
+* requirements-top.txt – The direct dependencies, unlocked, for reference.
 
 #### Containerization
 
@@ -210,8 +213,12 @@ source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 
 Once the virtual environment is activated, install all required packages:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
+
+This installs the runtime dependencies from `requirements.txt` plus the packages
+needed to run the test suite. The container image installs only
+`requirements.txt`, so test tooling is not shipped to production.
 
 ##### Create a .env File for Environment Variables
 
