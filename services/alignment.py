@@ -120,7 +120,7 @@ def align_sequences(gene):
     ImmuneDiscoverDataModel.db_name,
     ImmuneDiscoverDataModel.sequence,
     ImmuneDiscoverDataModel.gene
-    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(ImmuneDiscoverDataModel.db_name.notlike('%_F%')).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).distinct().all()
+    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).distinct().all()
 
     nt_seq_dict = {}
     for row in sequence_data:

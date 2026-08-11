@@ -20,7 +20,7 @@ def sequence_search(sequence_str):
     sequence_data = ImmuneDiscoverDataModel.query.with_entities(
     ImmuneDiscoverDataModel.db_name,
     ImmuneDiscoverDataModel.sequence
-    ).filter(ImmuneDiscoverDataModel.sequence.contains(sequence_str)).filter(ImmuneDiscoverDataModel.db_name.notlike('%_F%')).distinct().all()
+    ).filter(ImmuneDiscoverDataModel.sequence.contains(sequence_str)).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).distinct().all()
 
     data_out = []
     if len(sequence_data) < 1:

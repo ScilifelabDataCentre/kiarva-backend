@@ -12,12 +12,12 @@ def generate_fasta(gene_segment, type = "genomic"):
         distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name,
                 ImmuneDiscoverDataModel.sequence,
-                ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene_segment+'%')).filter(ImmuneDiscoverDataModel.db_name.notlike('%_F%')).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).all()
+                ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene_segment+'%')).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).all()
     elif type == "genomic_fl":
         distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name,
                 ImmuneDiscoverDataModel.sequence,
-                ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene_segment+'%_F%')).all()
+                ).distinct().filter(ImmuneDiscoverDataModel.db_name.like(gene_segment+'%')).filter(ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).all()
     elif type == "translated":
                 distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name_AA,
