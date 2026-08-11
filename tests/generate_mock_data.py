@@ -263,6 +263,26 @@ def mock_rows():
             aa_sequence="QVQLVESGGGVVQPGGSLRL",
         )
     )
+    # A second allele collapsing into the amino acid allele above, but stored under the
+    # plain gene name rather than the two-gene one. One amino acid allele under two
+    # gene values is what makes the whole-gene frequency table repeat an allele if the
+    # gene column is part of the DISTINCT.
+    rows.append(
+        row(
+            "case_JPT_EAS",
+            "IGHV3-30*02_S9143",
+            "IGHV3-30+",
+            "02_S9143",
+            sequence="CAGGTGCAGCTGGTGGAGTCTGGGGGAGGCGTGGTCCAGCCTGGGGGGTCCCTGAGACTT",
+            prefix="AGGTGTCCAGTGT",
+            suffix="CACAGTGAGGGG",
+            score="8.0",
+            snps="rs10137773(C:251,106791253);rs10148365(A:31,106791033);",
+            aa_allele="IGHV3-30*02/IGHV3-30-5*02",
+            aa_list="IGHV3-30*02/IGHV3-30-5*02,IGHV3-30*02_S9143",
+            aa_sequence="QVQLVESGGGVVQPGGSLRL",
+        )
+    )
     # A db_name that is rewritten to a gene the gene column never mentions
     # ("IGHV3-30+" -> "IGHV3-30-5"), which is what makes IGHV3-30-5 selectable.
     rows.append(
