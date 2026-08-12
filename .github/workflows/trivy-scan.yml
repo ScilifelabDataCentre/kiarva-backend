@@ -22,6 +22,12 @@
     
           - name: Run Trivy vulnerability scanner
             uses: aquasecurity/trivy-action@master
+            env:
+              # Trivy only detects a file named exactly requirements.txt, so the
+              # test dependencies in requirements-dev.txt would otherwise go
+              # unscanned. requirements-top.txt is deliberately left out, since
+              # it would duplicate findings already reported for requirements.txt.
+              TRIVY_FILE_PATTERNS: 'pip:.*requirements(-dev)?\.txt'
             with:
               scan-type: "fs"
               ignore-unfixed: true

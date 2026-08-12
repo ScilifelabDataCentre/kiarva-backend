@@ -91,6 +91,7 @@ KIARVA Flask app
 │   ├── plot_options.py
 │   └── population.py
 ├── requirements.txt
+├── requirements-dev.txt
 ├── resources
 │   └── immunediscoverdata.py
 ├── schemas.py
@@ -104,10 +105,12 @@ KIARVA Flask app
 │   ├── conftest.py
 │   ├── generate_mock_data.py
 │   ├── mock_data/
-│   └── test_routes.py
+│   ├── test_routes.py
+│   └── test_translation.py
 └── utils
     ├── fasta_processing.py
-    └── progress_bar.py
+    ├── progress_bar.py
+    └── translation.py
 ```
 
 #### Top-Level Files
@@ -120,7 +123,9 @@ KIARVA Flask app
 * security.py – Authentication and access control logic, if used.
 * pytest.ini – Configuration for Pytest.
 * README.md – Project documentation.
-* requirements.txt – Python dependencies.
+* requirements.txt – Version-locked runtime Python dependencies (what the container installs).
+* requirements-dev.txt – Runtime dependencies plus test tooling, for local development and CI.
+* requirements-top.txt – The direct dependencies, unlocked, for reference.
 
 #### Containerization
 
@@ -147,6 +152,7 @@ Uses Pytest with Flask and db fixtures.
 
 Under tests/ -
 * test_routes.py – Tests for API endpoints.
+* test_translation.py – Tests for the genetic code translation in utils/translation.py.
 * conftest.py – Shared test fixtures (e.g. test client, mock DB).
 * generate_mock_data.py – Generates mock inputs for testing. The dataset is kept minimal and deliberate: it uses real gene/allele naming and one row per edge case, each documented in the file. Run `python -m tests.generate_mock_data` after editing it to rewrite both mock_data/in/ and mock_data/compressed/.
 * mock_data/ – Static mock input files used by tests, in the same layout as data/: the tests unpack mock_data/compressed/ into mock_data/in/ the same way production unpacks the real data, so the .zip is the file that is actually loaded.
@@ -207,8 +213,12 @@ source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 
 Once the virtual environment is activated, install all required packages:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
+
+This installs the runtime dependencies from `requirements.txt` plus the packages
+needed to run the test suite. The container image installs only
+`requirements.txt`, so test tooling is not shipped to production.
 
 ##### Create a .env File for Environment Variables
 
