@@ -8,6 +8,7 @@ import os
 from db import db
 from constants import ROOT_DIR
 from models import ImmuneDiscoverDataModel
+from loaders.validation import SourceDataError, validate_loaded_data
 from sqlalchemy.exc import IntegrityError
 from flask import current_app
 import pyzipper
@@ -110,8 +111,10 @@ def load_tsv_to_db():
     # get all tsv files from the current data/in dir
     tsv_files = [file for file in os.listdir(data_in_dir) if file.endswith('.tsv')]
     if not tsv_files:
-        print("Missing tsv files, cannot load data.")
-        quit()
+        raise SourceDataError(
+            "No .tsv files found in " + data_in_dir + ", so there is no data to serve. "
+            "Check that data/compressed/ holds the archives and that ZIP_PASSWORD is set "
+            "for the password protected ones.")
 
     print("Loading files: " + str(tsv_files))
 
@@ -208,6 +211,12 @@ def load_tsv_to_db():
                     db.session.commit()
                 except IntegrityError as e:
                     db.session.rollback()
-                    print(e)
-                    print("!!!--------" + file + " contains duplicate values of current db instance. " + file + " Not loaded--------!!!")
-                    quit()
+                    raise SourceDataError(
+                        file + " duplicates rows already in the database and was not "
+                        "loaded. Every row must be a unique combination of case, db_name, "
+                        "gene and flank_index." ) from e
+
+    # Validated here rather than by the caller so that no code path can load data without
+    # checking it - the pytest fixtures call this function directly rather than going
+    # through create_app(), and a broken TSV should fail the tests too.
+    validate_loaded_data()
