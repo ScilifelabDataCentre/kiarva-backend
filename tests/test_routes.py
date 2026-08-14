@@ -183,18 +183,39 @@ def test_aminoacid_populationfrequencies(client):
     assert frequencies["ALL"] == (25, 0.96154)
 
 
+FREQUENCY_ENDPOINTS = (
+    ("/data/frequencies/superpopulations", "allele_name"),
+    ("/data/frequencies/populations", "allele_name"),
+    ("/data/aminoacidfrequencies/superpopulations", "aa_allele_name"),
+    ("/data/aminoacidfrequencies/populations", "aa_allele_name"),
+)
+
+
 def test_frequencies_missing_allele_name(client):
     # A request with no allele name is a client error, not a plot of zeroes. In prod the
     # amino acid dicts used to hold a None key - db_name_AA is null on every row that is
     # not plottable, and SELECT DISTINCT returns that null as an allele - so the missing
     # parameter looked up that key and returned an all-zero plot with a 200.
-    for endpoint in (
-        "/data/frequencies/superpopulations",
-        "/data/frequencies/populations",
-        "/data/aminoacidfrequencies/superpopulations",
-        "/data/aminoacidfrequencies/populations",
-    ):
+    for endpoint, _ in FREQUENCY_ENDPOINTS:
         assert get(client, endpoint).status_code == 400
+
+
+def test_frequencies_malformed_allele_name(client):
+    # Allele names use a narrow character set, so anything outside it is rejected before
+    # it reaches a query or a response. The payloads below are the shapes a scanner
+    # worries about: markup, a quote break-out, and an over-long value.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        for value in ("<script>alert(1)</script>", "IGHV1-8*01'\"", "IGHV1-8*01 OR 1=1", "A" * 65):
+            res = get(client, url(endpoint, **{param: value}))
+            assert res.status_code == 400, f"{endpoint} accepted {value!r}"
+
+            # Whatever the response says, it must not contain the rejected value: that
+            # reflection is the actual vulnerability, independent of content type.
+            assert value not in res.get_data(as_text=True)
+
+    # A legitimate name with every special character the dataset uses still gets through.
+    res = get(client, url("/data/frequencies/superpopulations", allele_name=TWO_GENE_ALLELE))
+    assert res.status_code == 200
 
 
 def test_frequency_table_prod_path(app):

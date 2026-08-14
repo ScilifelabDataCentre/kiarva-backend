@@ -4,7 +4,7 @@ from io import BytesIO
 from flask_smorest import Blueprint, abort
 from flask import current_app, request, send_file
 
-from security import api_key_required
+from security import api_key_required, validated_name
 from repositories import *
 from services import *
 
@@ -38,15 +38,14 @@ def get_db_name():
 # startup (prod) or calculate it on the spot (debug and testing, where the
 # pre-load is skipped).
 def frequency_data(allele_name, param_name, precalculated, population_type, plot_type):
-    if not allele_name:
-        abort(400, message="Missing required query parameter '" + param_name + "'.")
+    allele_name = validated_name(allele_name, param_name)
 
     if not current_app.debug and not current_app.config.get("TESTING"):
         # A miss means the allele is not plottable: a flanking ('_F') variant, an
         # IGHD/IGHJ allele, or a name that is not in the data at all. None of those
         # are pre-calculated, and the resulting KeyError used to surface as a 500.
         if allele_name not in precalculated:
-            abort(404, message="No plot data for allele '" + allele_name + "'.")
+            abort(404, message="No plot data for the requested allele.")
         return precalculated[allele_name]
 
     return calculate_frequencies(allele_name, population_type, plot_type)
