@@ -4,8 +4,12 @@
 from collections import Counter
 
 from flask import current_app
+from sqlalchemy import func
+
+from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from repositories.aminoacid import get_aminoacid_allele_list, get_aminoacid_top_allele
+from repositories.filters import plot_selection_criteria
 from repositories.population import get_populations
 
 from constants import allele_superpopulation_frequencies, allele_population_frequencies, aminoacid_allele_superpopulation_frequencies, aminoacid_allele_population_frequencies
@@ -50,6 +54,54 @@ subpopulation_order = [
     'ALL'
 ]
 
+# Key the per-population case totals are cached under. They are stored on the Flask app
+# rather than at module level because the pytest fixtures build one app per test, each
+# with its own in-memory database, and a module-level cache would let one test's totals
+# be used for another's data.
+POPULATION_TOTALS_KEY = "kiarva_population_totals"
+
+def population_totals(population_type):
+    """Number of distinct cases per population, plus the aggregated "ALL" total.
+
+    This is the denominator of every frequency: how many individuals a population
+    contains, which has nothing to do with which allele is being asked about. It costs a
+    full scan of the table, and used to be re-run inside every calculate_frequencies()
+    call - thousands of times during the startup pre-load, for one unchanging result.
+
+    The data is read-only once loaded, so it is calculated once per app and cached.
+    """
+    cache = current_app.extensions.setdefault(POPULATION_TOTALS_KEY, {})
+
+    if population_type not in cache:
+        cases = ImmuneDiscoverDataModel.query.with_entities(
+            ImmuneDiscoverDataModel.case,
+            getattr(ImmuneDiscoverDataModel, population_type)
+            ).distinct().all()
+        totals = Counter(case[1] for case in cases)
+        totals["ALL"] = sum(totals.values())
+        cache[population_type] = totals
+
+    # Copied so that a caller cannot mutate the cached totals
+    return Counter(cache[population_type])
+
+def frequency_entries(pop_totals, cases_with_allele, pop_order):
+    """Assemble the per-population entries for one allele, in the requested order.
+
+    cases_with_allele is a Counter, so a population in which no case carries the allele
+    contributes an n=0 entry rather than being left out - "we looked and found none" is
+    a different statement from "no data", and the plots show it as a zero bar. A
+    population present in the data but missing from pop_order is not reported at all,
+    which is how the ordering has always behaved.
+    """
+    return [
+        {
+            'population': pop,
+            'n': cases_with_allele[pop],
+            'frequency': round(cases_with_allele[pop]/pop_totals[pop], 5)
+        }
+        for pop in pop_order if pop in pop_totals
+    ]
+
 # calculate the frequency that an allele or aminoacid appears in a population, alt a superpopulation
 def calculate_frequencies(allele_name, population_type, plot_type):
     if plot_type == "genomic":
@@ -62,34 +114,66 @@ def calculate_frequencies(allele_name, population_type, plot_type):
     elif population_type == "population":
         pop_order = subpopulation_order
 
-    cases = ImmuneDiscoverDataModel.query.with_entities(
-        ImmuneDiscoverDataModel.case,
-        getattr(ImmuneDiscoverDataModel, population_type)
-        ).distinct().all()
+    pop_count = population_totals(population_type)
+
     cases_with_allele = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.case,
         getattr(ImmuneDiscoverDataModel, population_type),
         getattr(ImmuneDiscoverDataModel, db_name)
         ).where(getattr(ImmuneDiscoverDataModel, db_name) == allele_name).distinct().all()
 
-    populations = [col[1] for col in cases]
-    populations_with_allele = [col[1] for col in cases_with_allele]
-    pop_count = Counter(populations)
-    pop_with_allele_count = Counter(populations_with_allele)
-
-    pop_count["ALL"] = sum(pop_count.values())
+    pop_with_allele_count = Counter(col[1] for col in cases_with_allele)
     pop_with_allele_count["ALL"] = sum(pop_with_allele_count.values())
 
-    data_out = []
-    for pop_placement in pop_order:
-        for pop in pop_count:
-            if pop_placement == pop:
-                data_out.append({
-                    'population': pop,
-                    'n': pop_with_allele_count[pop],
-                    'frequency': round(pop_with_allele_count[pop]/pop_count[pop], 5)
-                })
-    
+    return frequency_entries(pop_count, pop_with_allele_count, pop_order)
+
+def calculate_all_frequencies(population_type, plot_type):
+    """Frequencies for every plottable allele at once, as {allele_name: [entries]}.
+
+    Produces exactly what calling calculate_frequencies() once per allele produces, but
+    in two queries rather than two per allele. That per-allele loop is what made the
+    startup pre-load take tens of minutes: it re-read the whole table for each allele,
+    and re-derived the same population totals every time.
+    """
+    if plot_type == "genomic":
+        db_name_column = ImmuneDiscoverDataModel.db_name
+    elif plot_type == "aminoacid":
+        db_name_column = ImmuneDiscoverDataModel.db_name_AA
+
+    if population_type == "superpopulation":
+        pop_order = superpopulation_order
+    elif population_type == "population":
+        pop_order = subpopulation_order
+
+    # The denominator is deliberately not restricted to the rows selected below. It means
+    # "how many individuals are in this population", so it covers the whole cohort - not
+    # only the individuals that happen to carry an amino acid allele or a plottable one.
+    pop_count = population_totals(population_type)
+
+    # One row per (allele, case, population), so that counting rows per
+    # (allele, population) counts distinct cases - what the DISTINCT in
+    # calculate_frequencies() does for a single allele.
+    distinct_cases = ImmuneDiscoverDataModel.query.with_entities(
+        db_name_column.label("allele"),
+        ImmuneDiscoverDataModel.case,
+        getattr(ImmuneDiscoverDataModel, population_type).label("population"),
+        ).filter(db_name_column != None).filter(*plot_selection_criteria()).distinct().subquery()
+
+    cases_per_allele = db.session.query(
+        distinct_cases.c.allele,
+        distinct_cases.c.population,
+        func.count(),
+        ).group_by(distinct_cases.c.allele, distinct_cases.c.population).all()
+
+    counts_by_allele = {}
+    for allele_name, population, n in cases_per_allele:
+        counts_by_allele.setdefault(allele_name, Counter())[population] = n
+
+    data_out = {}
+    for allele_name, cases_with_allele in counts_by_allele.items():
+        cases_with_allele["ALL"] = sum(cases_with_allele.values())
+        data_out[allele_name] = frequency_entries(pop_count, cases_with_allele, pop_order)
+
     return data_out
 
 # create a .tsv formated table with frequency data for the requested allele/gene and type (genomic or amino acid),
