@@ -195,19 +195,20 @@ def test_frequencies_missing_allele_name(client):
     # A request with no allele name is a client error, not a plot of zeroes. In prod the
     # amino acid dicts used to hold a None key - db_name_AA is null on every row that is
     # not plottable, and SELECT DISTINCT returns that null as an allele - so the missing
-    # parameter looked up that key and returned an all-zero plot with a 200.
+    # parameter looked up that key and returned an all-zero plot with a 200. The schemas
+    # make it a 422, the code webargs uses for a request that fails validation.
     for endpoint, _ in FREQUENCY_ENDPOINTS:
-        assert get(client, endpoint).status_code == 400
+        assert get(client, endpoint).status_code == 422
 
 
 def test_frequencies_malformed_allele_name(client):
-    # Allele names use a narrow character set, so anything outside it is rejected before
-    # it reaches a query or a response. The payloads below are the shapes a scanner
-    # worries about: markup, a quote break-out, and an over-long value.
+    # Allele names use a narrow character set, so the schema rejects anything outside it
+    # before the view runs. The payloads below are the shapes a scanner worries about:
+    # markup, a quote break-out, an injection attempt and an over-long value.
     for endpoint, param in FREQUENCY_ENDPOINTS:
         for value in ("<script>alert(1)</script>", "IGHV1-8*01'\"", "IGHV1-8*01 OR 1=1", "A" * 65):
             res = get(client, url(endpoint, **{param: value}))
-            assert res.status_code == 400, f"{endpoint} accepted {value!r}"
+            assert res.status_code == 422, f"{endpoint} accepted {value!r}"
 
             # Whatever the response says, it must not contain the rejected value: that
             # reflection is the actual vulnerability, independent of content type.
@@ -445,13 +446,37 @@ def test_sequencesearch_skips_flanking_rows(client):
     # so a match inside a flanking region is not a match.
     res = get(client, url("/data/sequences", sequence_str=FLANKING_ONLY_SEQUENCE))
     assert res.status_code == 200
-    assert res.get_json() == [{"allele": "", "sequence": "", "position": []}]
+    # The no-match entry used to key its empty list as "position" while every matching
+    # entry used "positions", so the frontend - whose type declares positions - read
+    # undefined here. The response schema does not allow the two to disagree.
+    assert res.get_json() == [{"allele": "", "sequence": "", "positions": []}]
 
 
 def test_sequencesearch_no_match(client):
     res = get(client, url("/data/sequences", sequence_str="NOMATCHFORTHIS"))
     assert res.status_code == 200
-    assert res.get_json() == [{"allele": "", "sequence": "", "position": []}]
+    assert res.get_json() == [{"allele": "", "sequence": "", "positions": []}]
+
+
+def test_sequencesearch_rejects_wildcards_and_metacharacters(client):
+    # Sequences are letters and digits, so the schema rejects both the SQL LIKE wildcards
+    # ('%', '_') and the regex metacharacters that used to reach re.finditer.
+    for value in ("%", "_", "__________", "(", "[", "(a+)+", "<script>"):
+        res = get(client, url("/data/sequences", sequence_str=value))
+        assert res.status_code == 422, f"{value!r} was accepted"
+
+
+def test_sequence_search_escapes_like_wildcards(app):
+    # The schema now stops a wildcard reaching the query, so this covers the layer below
+    # it: .contains() without autoescape treated '%' and '_' as LIKE wildcards, matching
+    # every row, so a search for a single '%' returned the whole sequence table.
+    from services.sequence_search import sequence_search
+
+    empty = [{"allele": "", "sequence": "", "positions": []}]
+    assert sequence_search("%") == empty
+    assert sequence_search("_") == empty
+    # A real substring still matches, so the escaping has not broken ordinary searching.
+    assert sequence_search("ESEARCHTES")[0]["allele"] == "IGHV3-23*01"
 
 
 def test_send_fasta_genomic(client):

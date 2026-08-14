@@ -1,45 +1,80 @@
 # Flask resources file containing all endpoints related to ImmuneDiscoverData
+#
+# Every endpoint declares its query arguments and its response through the marshmallow
+# schemas in schemas.py. flask_smorest then rejects a malformed request with a 422 before
+# the view runs, serialises the response down to the declared fields, and documents both
+# in the OpenAPI spec at /swagger-ui.
+#
+# Decorator order matters: api_key_required sits outside blp.arguments so an unauthorised
+# caller is turned away before any request parsing happens.
 
 from io import BytesIO
 from flask_smorest import Blueprint, abort
-from flask import current_app, request, send_file
+from flask import current_app, send_file
 
-from security import api_key_required, validated_name
+from security import api_key_required
 from repositories import *
 from services import *
 
 from constants import allele_superpopulation_frequencies, allele_population_frequencies, aminoacid_allele_superpopulation_frequencies, aminoacid_allele_population_frequencies
+from schemas import (
+    AlleleNameArgs,
+    AlignedSequenceSchema,
+    AminoAcidAlleleListSchema,
+    AminoAcidAlleleNameArgs,
+    AminoAcidGeneNameArgs,
+    AminoAcidTopAlleleSchema,
+    DbNameSchema,
+    FastaFileNameArgs,
+    FrequencySchema,
+    GeneNameArgs,
+    HealthSchema,
+    IgSNPerSchema,
+    PlotOptionArgs,
+    PopulationRegionSchema,
+    SelectionArgs,
+    SequenceSearchArgs,
+    SequenceSearchSchema,
+)
 from services.frequencies import create_frequencies_table
 
+TSV_CONTENT_TYPE = "text/tab-separated-values"
+FASTA_CONTENT_TYPE = "text/x-fasta"
 
 blp = Blueprint("ImmuneDiscoverData", __name__, description="Operations on ImmuneDiscover Data")
 
 @blp.route("/health")
+@blp.response(200, HealthSchema)
 def health():
-    return {"status": "ok"}, 200
+    return {"status": "ok"}
 
 @blp.route("/data/db_name")
 @api_key_required
+@blp.arguments(SelectionArgs, location="query")
+@blp.response(200, DbNameSchema)
 # API to fetch the corresponding db_name (true allele name) if corresponding values from the
 # "gene" and "allele" columns are supplied in the URL.
-# For example: 
+# For example:
 # Rows with db_name: IGHV3-30*02/IGHV3-30-5*02 have gene: IGHV3-30-5 and allele: IGHV3-30*02/IGHV3-30-5*02.
 # If the request:
 #  /data/db_name?selection=IGHV3-30-5,IGHV3-30*02/IGHV3-30-5*02
 # is sent to the server, the requester then gets the response
 # {db_name: IGHV3-30*02/IGHV3-30-5*02}.
-def get_db_name():
-    gene, allele = request.args.get("selection").split(",")
-    db_name = get_db_name_from_options(gene, allele)
-    return {"db_name": db_name}
+def get_db_name(args):
+    selection = args["selection"].split(",")
+    # Unpacking a selection that is not exactly gene,allele used to raise and surface as
+    # a 500. The schema cannot express this, since a gene name may itself contain a comma.
+    if len(selection) != 2:
+        abort(422, message="'selection' must be a gene and an allele, comma separated.")
 
-# The four frequency endpoints below all have the same shape: read an allele name
-# from the query string, then either serve it from the dict pre-calculated at
-# startup (prod) or calculate it on the spot (debug and testing, where the
-# pre-load is skipped).
-def frequency_data(allele_name, param_name, precalculated, population_type, plot_type):
-    allele_name = validated_name(allele_name, param_name)
+    gene, allele = selection
+    return {"db_name": get_db_name_from_options(gene, allele)}
 
+# The four frequency endpoints below all have the same shape: take the allele name from
+# the validated query arguments, then either serve it from the dict pre-calculated at
+# startup (prod) or calculate it on the spot (debug and testing, where the pre-load is
+# skipped).
+def frequency_data(allele_name, precalculated, population_type, plot_type):
     if not current_app.debug and not current_app.config.get("TESTING"):
         # A miss means the allele is not plottable: a flanking ('_F') variant, an
         # IGHD/IGHJ allele, or a name that is not in the data at all. None of those
@@ -52,172 +87,161 @@ def frequency_data(allele_name, param_name, precalculated, population_type, plot
 
 @blp.route("/data/frequencies/superpopulations")
 @api_key_required
-def get_superpopulation_allele_frequencies():
-    return frequency_data(request.args.get("allele_name"), "allele_name",
-                          allele_superpopulation_frequencies, "superpopulation", "genomic")
+@blp.arguments(AlleleNameArgs, location="query")
+@blp.response(200, FrequencySchema(many=True))
+def get_superpopulation_allele_frequencies(args):
+    return frequency_data(args["allele_name"], allele_superpopulation_frequencies,
+                          "superpopulation", "genomic")
 
 @blp.route("/data/aminoacidfrequencies/superpopulations")
 @api_key_required
-def get_superpopulation_aminoacid_frequencies():
-    return frequency_data(request.args.get("aa_allele_name"), "aa_allele_name",
-                          aminoacid_allele_superpopulation_frequencies, "superpopulation", "aminoacid")
+@blp.arguments(AminoAcidAlleleNameArgs, location="query")
+@blp.response(200, FrequencySchema(many=True))
+def get_superpopulation_aminoacid_frequencies(args):
+    return frequency_data(args["aa_allele_name"], aminoacid_allele_superpopulation_frequencies,
+                          "superpopulation", "aminoacid")
 
 @blp.route("/data/frequencies/populations")
 @api_key_required
-def get_subpopulation_allele_frequencies():
-    return frequency_data(request.args.get("allele_name"), "allele_name",
-                          allele_population_frequencies, "population", "genomic")
+@blp.arguments(AlleleNameArgs, location="query")
+@blp.response(200, FrequencySchema(many=True))
+def get_subpopulation_allele_frequencies(args):
+    return frequency_data(args["allele_name"], allele_population_frequencies,
+                          "population", "genomic")
 
 @blp.route("/data/aminoacidfrequencies/populations")
 @api_key_required
-def get_subpopulation_aminoacid_frequencies():
-    return frequency_data(request.args.get("aa_allele_name"), "aa_allele_name",
-                          aminoacid_allele_population_frequencies, "population", "aminoacid")
+@blp.arguments(AminoAcidAlleleNameArgs, location="query")
+@blp.response(200, FrequencySchema(many=True))
+def get_subpopulation_aminoacid_frequencies(args):
+    return frequency_data(args["aa_allele_name"], aminoacid_allele_population_frequencies,
+                          "population", "aminoacid")
+
+# The four table downloads and the three FASTA downloads return a file rather than JSON,
+# so they declare a content type instead of a response schema.
+def tsv_attachment(body, download_name):
+    # send_file expects bytes rather than str
+    buffer = BytesIO()
+    buffer.write(str.encode(body))
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=download_name)
 
 @blp.route("/data/frequencies/table/allele")
 @api_key_required
-def get_subpopulation_allele_frequencies():
-    allele_name = request.args.get("allele_name")
-    buffer = BytesIO()
-    buffer.write(str.encode(create_frequencies_table(allele_name, "genomic")))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=allele_name + '_frequencies_genomic.tsv'
-    )
+@blp.arguments(AlleleNameArgs, location="query")
+@blp.response(200, content_type=TSV_CONTENT_TYPE)
+def get_allele_frequencies_table(args):
+    allele_name = args["allele_name"]
+    return tsv_attachment(create_frequencies_table(allele_name, "genomic"),
+                          allele_name + '_frequencies_genomic.tsv')
 
 @blp.route("/data/aminoacidfrequencies/table/allele")
 @api_key_required
-def get_subpopulation_allele_frequencies():
-    aa_allele_name = request.args.get("aa_allele_name")
-    buffer = BytesIO()
-    buffer.write(str.encode(create_frequencies_table(aa_allele_name, "aminoacid")))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=aa_allele_name + '_frequencies_aminoacid.tsv'
-    )
+@blp.arguments(AminoAcidAlleleNameArgs, location="query")
+@blp.response(200, content_type=TSV_CONTENT_TYPE)
+def get_aminoacid_allele_frequencies_table(args):
+    aa_allele_name = args["aa_allele_name"]
+    return tsv_attachment(create_frequencies_table(aa_allele_name, "aminoacid"),
+                          aa_allele_name + '_frequencies_aminoacid.tsv')
 
 @blp.route("/data/frequencies/table/gene")
 @api_key_required
-def get_subpopulation_allele_frequencies():
-    gene_name = request.args.get("gene_name")
-    buffer = BytesIO()
-    buffer.write(str.encode(create_frequencies_table(gene_name, "genomic", full_gene=True)))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=gene_name + '_frequencies_genomic.tsv'
-    )
+@blp.arguments(GeneNameArgs, location="query")
+@blp.response(200, content_type=TSV_CONTENT_TYPE)
+def get_gene_frequencies_table(args):
+    gene_name = args["gene_name"]
+    return tsv_attachment(create_frequencies_table(gene_name, "genomic", full_gene=True),
+                          gene_name + '_frequencies_genomic.tsv')
 
 @blp.route("/data/aminoacidfrequencies/table/gene")
 @api_key_required
-def get_subpopulation_allele_frequencies():
-    aa_gene_name = request.args.get("aa_gene_name")
-    buffer = BytesIO()
-    buffer.write(str.encode(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True)))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=aa_gene_name + '_frequencies_aminoacid.tsv'
-    )
-    
+@blp.arguments(AminoAcidGeneNameArgs, location="query")
+@blp.response(200, content_type=TSV_CONTENT_TYPE)
+def get_aminoacid_gene_frequencies_table(args):
+    aa_gene_name = args["aa_gene_name"]
+    return tsv_attachment(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True),
+                          aa_gene_name + '_frequencies_aminoacid.tsv')
+
 @blp.route("/data/igsnperdata")
 @api_key_required
-def get_igsnper_data():
-    allele_name = request.args.get("allele_name")
-    data_out = get_igSNPer_data(allele_name)
-    return data_out
+@blp.arguments(AlleleNameArgs, location="query")
+@blp.response(200, IgSNPerSchema)
+def get_igsnper_data(args):
+    return get_igSNPer_data(args["allele_name"])
 
 @blp.route("/data/aminoacidalleles")
 @api_key_required
-def get_aa_top_allele():
-    aa_allele_name = request.args.get("aa_allele_name")
-    data_out = get_aminoacid_top_allele(aa_allele_name)
-    return data_out
-    
+@blp.arguments(AminoAcidAlleleNameArgs, location="query")
+@blp.response(200, AminoAcidTopAlleleSchema)
+def get_aa_top_allele(args):
+    return get_aminoacid_top_allele(args["aa_allele_name"])
+
 @blp.route("/data/aminoacidlist")
 @api_key_required
-def get_aminoacid_list():
-    aa_allele_name = request.args.get("aa_allele_name")
-    data_out = get_aminoacid_allele_list(aa_allele_name)
-    return data_out
-    
+@blp.arguments(AminoAcidAlleleNameArgs, location="query")
+@blp.response(200, AminoAcidAlleleListSchema)
+def get_aminoacid_list(args):
+    return get_aminoacid_allele_list(args["aa_allele_name"])
+
 @blp.route("/data/populationregions")
 @api_key_required
+@blp.response(200, PopulationRegionSchema(many=True))
 def get_population_regions():
-    data_out = get_populations()
-    return data_out
-    
+    return get_populations()
 
 @blp.route("/data/plotoptions", methods=["GET"])
 @api_key_required
-def get_next_selection_option():
-    gene = request.args.get("current_selection")
-    data_out = get_plot_options(gene)
-    return data_out
+@blp.arguments(PlotOptionArgs, location="query")
+# Responds with a bare list of names rather than a list of objects, which a marshmallow
+# schema cannot describe, so the response is documented without one.
+@blp.response(200, description="Selectable names for the next part of the selection")
+def get_next_selection_option(args):
+    return get_plot_options(args["current_selection"])
 
 @blp.route("/data/sequences/alignedsequences")
 @api_key_required
-def get_aligned_sequences():
-    gene = request.args.get("gene_name")
-    aligned_seqs = align_sequences(gene)
-    return aligned_seqs
+@blp.arguments(GeneNameArgs, location="query")
+@blp.response(200, AlignedSequenceSchema(many=True))
+def get_aligned_sequences(args):
+    return align_sequences(args["gene_name"])
 
 @blp.route("/data/sequences")
 @api_key_required
-def get_sequence_search():
-    sequence_str = request.args.get("sequence_str")
-    data_out = sequence_search(sequence_str)
-    return data_out
+@blp.arguments(SequenceSearchArgs, location="query")
+@blp.response(200, SequenceSearchSchema(many=True))
+def get_sequence_search(args):
+    return sequence_search(args["sequence_str"])
 
 @blp.route("/fasta/genomic")
 @api_key_required
-def send_fasta():
-    file_name = request.args.get("file_name")
-    # send_file expects bytes rather than str
-    buffer = BytesIO()
-    buffer.write(str.encode(generate_fasta(file_name, type="genomic")))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=file_name + '_genomic.fasta'
-    )
+@blp.arguments(FastaFileNameArgs, location="query")
+@blp.response(200, content_type=FASTA_CONTENT_TYPE)
+def send_genomic_fasta(args):
+    file_name = args["file_name"]
+    return tsv_attachment(generate_fasta(file_name, type="genomic"),
+                          file_name + '_genomic.fasta')
 
 @blp.route("/fasta/genomic_fl")
 @api_key_required
-def send_fasta():
-    file_name = request.args.get("file_name")
-    # send_file expects bytes rather than str
-    buffer = BytesIO()
-    buffer.write(str.encode(generate_fasta(file_name, type="genomic_fl")))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=file_name + '_genomic_fl.fasta'
-    )
+@blp.arguments(FastaFileNameArgs, location="query")
+@blp.response(200, content_type=FASTA_CONTENT_TYPE)
+def send_flanking_genomic_fasta(args):
+    file_name = args["file_name"]
+    return tsv_attachment(generate_fasta(file_name, type="genomic_fl"),
+                          file_name + '_genomic_fl.fasta')
 
 @blp.route("/fasta/translated")
 @api_key_required
-def send_fasta():
-    file_name = request.args.get("file_name")
-    # send_file expects bytes rather than str
-    buffer = BytesIO()
-    buffer.write(str.encode(generate_fasta(file_name, type="translated")))
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=file_name + '_translated.fasta'
-    )
+@blp.arguments(FastaFileNameArgs, location="query")
+@blp.response(200, content_type=FASTA_CONTENT_TYPE)
+def send_translated_fasta(args):
+    file_name = args["file_name"]
+    return tsv_attachment(generate_fasta(file_name, type="translated"),
+                          file_name + '_translated.fasta')
 
 @blp.route("/checkapikey")
 @api_key_required
+# Deliberately undecorated: this returns a bare string, and blp.response would JSON-encode
+# it into '"Correct key!"' with quotes, which is a breaking change for the caller.
 def check_api_key():
     return "Correct key!"
