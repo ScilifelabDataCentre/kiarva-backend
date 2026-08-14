@@ -253,6 +253,55 @@ def test_frequency_table_prod_path(app):
     assert len(flanking.splitlines()) == len(from_cache.splitlines())
 
 
+def test_calculate_all_frequencies_matches_per_allele(app):
+    # Two implementations serve the same numbers: calculate_all_frequencies fills the
+    # dictionaries at startup in prod, calculate_frequencies answers requests directly
+    # under debug and testing. Nothing else keeps them in step, so compare them over
+    # every allele in the mock dataset.
+    from models.immunediscoverdata import ImmuneDiscoverDataModel
+    from repositories.filters import plot_selection_criteria
+    from services.frequencies import calculate_all_frequencies, calculate_frequencies
+
+    for plot_type, column in (
+        ("genomic", ImmuneDiscoverDataModel.db_name),
+        ("aminoacid", ImmuneDiscoverDataModel.db_name_AA),
+    ):
+        alleles = [
+            row[0]
+            for row in ImmuneDiscoverDataModel.query.with_entities(column)
+            .filter(column != None)
+            .filter(*plot_selection_criteria())
+            .distinct()
+            .all()
+        ]
+        assert alleles, f"mock data has no plottable {plot_type} alleles to compare"
+
+        for population_type, expected_populations in (
+            ("superpopulation", EXPECTED_SUPERPOPULATIONS),
+            ("population", EXPECTED_POPULATIONS),
+        ):
+            bulk = calculate_all_frequencies(population_type, plot_type)
+            assert sorted(bulk) == sorted(alleles)
+
+            for allele in alleles:
+                assert bulk[allele] == calculate_frequencies(
+                    allele, population_type, plot_type
+                ), f"{plot_type}/{population_type} frequencies differ for {allele}"
+
+            # Every allele reports every population, including those where no case carries
+            # it. GROUP BY returns no row at all for those, so they have to be filled in as
+            # n=0 rather than left out: in a plot a missing bar and a zero bar say
+            # different things.
+            for allele, entries in bulk.items():
+                assert [
+                    entry["population"] for entry in entries
+                ] == expected_populations, f"{allele} is missing populations"
+
+            assert any(
+                entry["n"] == 0 for entries in bulk.values() for entry in entries
+            ), "mock data no longer covers the zero-carrier case this guards"
+
+
 def test_igsnperdata(client):
     res = get(client, url("/data/igsnperdata", allele_name=TEST_ALLELE))
     assert res.status_code == 200
