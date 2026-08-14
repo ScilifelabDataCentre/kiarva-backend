@@ -5,6 +5,7 @@
 # rather than shapes wherever the dataset makes that possible, so both files have to
 # be read together when either changes.
 
+import copy
 import os
 
 from urllib.parse import quote
@@ -182,6 +183,76 @@ def test_aminoacid_populationfrequencies(client):
     assert frequencies["ALL"] == (25, 0.96154)
 
 
+FREQUENCY_ENDPOINTS = (
+    ("/data/frequencies/superpopulations", "allele_name"),
+    ("/data/frequencies/populations", "allele_name"),
+    ("/data/aminoacidfrequencies/superpopulations", "aa_allele_name"),
+    ("/data/aminoacidfrequencies/populations", "aa_allele_name"),
+)
+
+
+def test_frequencies_missing_allele_name(client):
+    # A request with no allele name is a client error, not a plot of zeroes. In prod the
+    # amino acid dicts used to hold a None key - db_name_AA is null on every row that is
+    # not plottable, and SELECT DISTINCT returns that null as an allele - so the missing
+    # parameter looked up that key and returned an all-zero plot with a 200.
+    for endpoint, _ in FREQUENCY_ENDPOINTS:
+        assert get(client, endpoint).status_code == 400
+
+
+def test_frequencies_malformed_allele_name(client):
+    # Allele names use a narrow character set, so anything outside it is rejected before
+    # it reaches a query or a response. The payloads below are the shapes a scanner
+    # worries about: markup, a quote break-out, and an over-long value.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        for value in ("<script>alert(1)</script>", "IGHV1-8*01'\"", "IGHV1-8*01 OR 1=1", "A" * 65):
+            res = get(client, url(endpoint, **{param: value}))
+            assert res.status_code == 400, f"{endpoint} accepted {value!r}"
+
+            # Whatever the response says, it must not contain the rejected value: that
+            # reflection is the actual vulnerability, independent of content type.
+            assert value not in res.get_data(as_text=True)
+
+    # A legitimate name with every special character the dataset uses still gets through.
+    res = get(client, url("/data/frequencies/superpopulations", allele_name=TWO_GENE_ALLELE))
+    assert res.status_code == 200
+
+
+def test_frequency_table_prod_path(app):
+    # Under TESTING the table download always calculates frequencies on demand, so these
+    # two prod-only behaviours need the flag flipped to reach the branch that reads the
+    # dictionaries pre-loaded at startup.
+    from constants import allele_population_frequencies, allele_superpopulation_frequencies
+    from services.frequencies import calculate_frequencies, create_frequencies_table
+
+    allele_superpopulation_frequencies[TEST_ALLELE] = calculate_frequencies(
+        TEST_ALLELE, "superpopulation", "genomic")
+    allele_population_frequencies[TEST_ALLELE] = calculate_frequencies(
+        TEST_ALLELE, "population", "genomic")
+    cached_before = copy.deepcopy(allele_superpopulation_frequencies[TEST_ALLELE])
+
+    app.config["TESTING"] = False
+    try:
+        from_cache = create_frequencies_table(TEST_ALLELE, "genomic")
+        cached_after = copy.deepcopy(allele_superpopulation_frequencies[TEST_ALLELE])
+        # Only plottable alleles are pre-calculated, so a download for a flanking variant
+        # has to fall back to calculating it rather than raising a KeyError.
+        flanking = create_frequencies_table(TEST_ALLELE + "_F1", "genomic")
+    finally:
+        app.config["TESTING"] = True
+        allele_superpopulation_frequencies.clear()
+        allele_population_frequencies.clear()
+
+    # Building the tsv writes 'allele' and 'superpopulation' into each entry. Done in
+    # place, those keys would leak into every later response from the plot endpoints.
+    assert cached_after == cached_before
+
+    assert from_cache.splitlines()[0].split("\t") == [
+        "allele", "population", "superpopulation", "frequency", "n",
+    ]
+    assert len(flanking.splitlines()) == len(from_cache.splitlines())
+
+
 def test_igsnperdata(client):
     res = get(client, url("/data/igsnperdata", allele_name=TEST_ALLELE))
     assert res.status_code == 200
@@ -245,13 +316,17 @@ def test_plotoptions_genes(client):
     assert get(client, url("/data/plotoptions", current_selection="IGHV")).get_json() == [
         "1-69", "1-8", "3-23", "3-30", "3-30-5",
     ]
-    assert get(client, url("/data/plotoptions", current_selection="IGHD")).get_json() == ["1-1"]
-    assert get(client, url("/data/plotoptions", current_selection="IGHJ")).get_json() == ["6"]
+    # Only IGHV and TRGV are plotted. The research group has specified that IGHD and
+    # IGHJ are not to be offered as plot or MSA selections, so they yield no options
+    # even though their rows are loaded for the FASTA downloads.
+    assert get(client, url("/data/plotoptions", current_selection="IGHD")).get_json() == []
+    assert get(client, url("/data/plotoptions", current_selection="IGHJ")).get_json() == []
 
 
 def test_plotoptions_alleles(client):
-    # Allele lists per gene. The flanking IGHV1-8*01_F1 row repeats allele "01" and so
-    # adds nothing here, while the homozygous deletion is offered as "DEL".
+    # Allele lists per gene. The flanking IGHV1-8*01_F1 row is excluded outright, and
+    # for V genes it repeats allele "01" anyway so it would add nothing here. The
+    # homozygous deletion is offered as "DEL".
     res = get(client, url("/data/plotoptions", current_selection=TEST_GENE + "*"))
     assert res.status_code == 200
     assert res.get_json() == ["01", "02", "04", "DEL"]
@@ -269,10 +344,10 @@ def test_plotoptions_alleles(client):
         "03_S1123", TWO_GENE_ALLELE,
     ]
 
-    # D and J flanking rows, unlike V ones, do suffix the allele column.
-    assert get(client, url("/data/plotoptions", current_selection="IGHD1-1*")).get_json() == [
-        "01", "01_F1",
-    ]
+    # D and J flanking rows, unlike V ones, do suffix the allele column - so before
+    # IGHD was excluded this gene offered a selectable "01_F1". It now offers nothing,
+    # both because the locus is not plotted and because _F rows are filtered out.
+    assert get(client, url("/data/plotoptions", current_selection="IGHD1-1*")).get_json() == []
 
 
 def test_db_name(client):

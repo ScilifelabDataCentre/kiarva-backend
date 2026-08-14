@@ -159,15 +159,25 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
 
         plot_data_subpops = {}
         plot_data_superpops = {}
+        if plot_type == "genomic":
+            superpop_cache = allele_superpopulation_frequencies
+            subpop_cache = allele_population_frequencies
+        else:
+            superpop_cache = aminoacid_allele_superpopulation_frequencies
+            subpop_cache = aminoacid_allele_population_frequencies
+
         # If running on prod we have population frequencies pre-calculated in dictionaries,
-        # use them directly
-        if not current_app.debug and not current_app.config.get("TESTING"):
-            if plot_type == "genomic":
-                plot_data_superpops = allele_superpopulation_frequencies[allele_name]
-                plot_data_subpops = allele_population_frequencies[allele_name]
-            elif plot_type == "aminoacid":
-                plot_data_superpops = aminoacid_allele_superpopulation_frequencies[allele_name]
-                plot_data_subpops = aminoacid_allele_population_frequencies[allele_name]
+        # use them directly. Only the plottable alleles are pre-calculated though, and a
+        # download can legitimately ask for one that is not - a flanking ('_F') variant, or
+        # an IGHD/IGHJ allele - so fall back to calculating those here. Under debug and
+        # testing nothing is pre-loaded and everything is calculated on demand.
+        if not current_app.debug and not current_app.config.get("TESTING") and allele_name in superpop_cache:
+            # Copied, not referenced: the loop below writes 'allele', 'superpopulation' and
+            # 'collapsed_translated_sequence' into each entry, which would otherwise mutate
+            # the cached dictionaries in place and leak those keys into every later response
+            # from the frequency plot endpoints.
+            plot_data_superpops = [dict(entry) for entry in superpop_cache[allele_name]]
+            plot_data_subpops = [dict(entry) for entry in subpop_cache[allele_name]]
         else:
             plot_data_superpops = calculate_frequencies(allele_name, "superpopulation", plot_type)
             plot_data_subpops = calculate_frequencies(allele_name, "population", plot_type)

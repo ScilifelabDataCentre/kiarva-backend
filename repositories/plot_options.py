@@ -8,6 +8,7 @@
 # Function input - [IGHV1-2*], output [01]
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from repositories.filters import plot_selection_criteria
 from utils.regex import plot_options_regex
 
 def get_plot_options(selection):
@@ -23,14 +24,14 @@ def get_plot_options(selection):
     if (not select_allele):
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.gene
-            ).distinct().filter(ImmuneDiscoverDataModel.gene.like(selection+'%')).all()
+            ).distinct().filter(ImmuneDiscoverDataModel.gene.like(selection+'%')).filter(*plot_selection_criteria()).all()
     else:
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.allele,
             ImmuneDiscoverDataModel.gene
             # selection[:-1] to omit the '*' from query
             # i.e. input "IGHV1-2*"" -> match "IGHV1-2"
-            ).distinct().filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(selection[:-1]))).all()
+            ).distinct().filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(selection[:-1]))).filter(*plot_selection_criteria()).all()
 
     try:
         for row in data:

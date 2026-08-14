@@ -1,10 +1,10 @@
 # Flask resources file containing all endpoints related to ImmuneDiscoverData
 
 from io import BytesIO
-from flask_smorest import Blueprint
+from flask_smorest import Blueprint, abort
 from flask import current_app, request, send_file
 
-from security import api_key_required
+from security import api_key_required, validated_name
 from repositories import *
 from services import *
 
@@ -33,45 +33,46 @@ def get_db_name():
     db_name = get_db_name_from_options(gene, allele)
     return {"db_name": db_name}
 
+# The four frequency endpoints below all have the same shape: read an allele name
+# from the query string, then either serve it from the dict pre-calculated at
+# startup (prod) or calculate it on the spot (debug and testing, where the
+# pre-load is skipped).
+def frequency_data(allele_name, param_name, precalculated, population_type, plot_type):
+    allele_name = validated_name(allele_name, param_name)
+
+    if not current_app.debug and not current_app.config.get("TESTING"):
+        # A miss means the allele is not plottable: a flanking ('_F') variant, an
+        # IGHD/IGHJ allele, or a name that is not in the data at all. None of those
+        # are pre-calculated, and the resulting KeyError used to surface as a 500.
+        if allele_name not in precalculated:
+            abort(404, message="No plot data for the requested allele.")
+        return precalculated[allele_name]
+
+    return calculate_frequencies(allele_name, population_type, plot_type)
+
 @blp.route("/data/frequencies/superpopulations")
 @api_key_required
 def get_superpopulation_allele_frequencies():
-    allele_name = request.args.get("allele_name")
-    if not current_app.debug and not current_app.config.get("TESTING"):
-        data_out = allele_superpopulation_frequencies[allele_name]
-    else:
-        data_out = calculate_frequencies(allele_name, "superpopulation", "genomic")
-    return data_out
+    return frequency_data(request.args.get("allele_name"), "allele_name",
+                          allele_superpopulation_frequencies, "superpopulation", "genomic")
 
 @blp.route("/data/aminoacidfrequencies/superpopulations")
 @api_key_required
 def get_superpopulation_aminoacid_frequencies():
-    aa_allele_name = request.args.get("aa_allele_name")
-    if not current_app.debug and not current_app.config.get("TESTING"):
-        data_out = aminoacid_allele_superpopulation_frequencies[aa_allele_name]
-    else:
-        data_out = calculate_frequencies(aa_allele_name, "superpopulation", "aminoacid")
-    return data_out
-    
+    return frequency_data(request.args.get("aa_allele_name"), "aa_allele_name",
+                          aminoacid_allele_superpopulation_frequencies, "superpopulation", "aminoacid")
+
 @blp.route("/data/frequencies/populations")
 @api_key_required
 def get_subpopulation_allele_frequencies():
-    allele_name = request.args.get("allele_name")
-    if not current_app.debug and not current_app.config.get("TESTING"):
-        data_out = allele_population_frequencies[allele_name]
-    else:
-        data_out = calculate_frequencies(allele_name, "population", "genomic")
-    return data_out
-    
+    return frequency_data(request.args.get("allele_name"), "allele_name",
+                          allele_population_frequencies, "population", "genomic")
+
 @blp.route("/data/aminoacidfrequencies/populations")
 @api_key_required
 def get_subpopulation_aminoacid_frequencies():
-    aa_allele_name = request.args.get("aa_allele_name")
-    if not current_app.debug and not current_app.config.get("TESTING"):
-        data_out = aminoacid_allele_population_frequencies[aa_allele_name]
-    else:
-        data_out = calculate_frequencies(aa_allele_name, "population", "aminoacid")
-    return data_out
+    return frequency_data(request.args.get("aa_allele_name"), "aa_allele_name",
+                          aminoacid_allele_population_frequencies, "population", "aminoacid")
 
 @blp.route("/data/frequencies/table/allele")
 @api_key_required

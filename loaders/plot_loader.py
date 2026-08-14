@@ -5,15 +5,22 @@
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from constants import allele_superpopulation_frequencies, allele_population_frequencies, aminoacid_allele_superpopulation_frequencies, aminoacid_allele_population_frequencies
+from repositories.filters import plot_selection_criteria
 from services import calculate_frequencies
 from utils import print_progress_bar
 from datetime import datetime
 
 def load_plot_data_to_dict():
-    alleles_in_db = ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.db_name).distinct().all()
+    # Only the alleles that can actually be selected for a plot are pre-calculated.
+    # plot_selection_criteria() drops the flanking ('_F') variants and the IGHD/IGHJ
+    # loci, which are loaded for the FASTA downloads but never plotted.
+    alleles_in_db = ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.db_name).filter(*plot_selection_criteria()).distinct().all()
     alleles = [allele[0] for allele in alleles_in_db]
 
-    aminoacid_alleles_in_db = ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.db_name_AA).distinct().all()
+    # db_name_AA is null on every row that is not plottable, so filtering the nulls
+    # out is what keeps a None key - and the all-zero entry it used to hold - out of
+    # the amino acid dicts.
+    aminoacid_alleles_in_db = ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.db_name_AA).filter(ImmuneDiscoverDataModel.db_name_AA != None).filter(*plot_selection_criteria()).distinct().all()
     aminoacid_alleles = [aminoacid_allele[0] for aminoacid_allele in aminoacid_alleles_in_db]
 
     nr_of_alleles = len(alleles_in_db)
