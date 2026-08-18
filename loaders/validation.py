@@ -15,19 +15,26 @@ from sqlalchemy import func, or_
 
 from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from repositories.filters import KNOWN_LOCI, LOCUS_PREFIX_LENGTH, in_plot_loci
 from services.frequencies import subpopulation_order, superpopulation_order
 
 class SourceDataError(Exception):
     """Raised when loaded data breaks an assumption the rest of the app relies on."""
 
 # A row carries no amino acid data exactly when it is one of the kinds that is never
-# translated: a flanking region variant, a homozygous deletion, or a D or J gene.
+# translated: a flanking region variant, a homozygous deletion, or a gene outside the V loci.
+#
+# The last of those is derived from PLOT_LOCI rather than listing IGHD and IGHJ, which is
+# what the D and J genes in the current data happen to be. Spelling them out made the two
+# definitions hand-maintained complements of each other: a TRGJ row appearing in future
+# source data would have been outside PLOT_LOCI, so never plotted, and simultaneously
+# outside the IGHD/IGHJ list, so expected to be translated - and the service would have
+# refused to boot reporting "should be translated" about a gene that never is.
 def never_translated():
     return or_(
         ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True),
         ImmuneDiscoverDataModel.allele == 'DEL',
-        ImmuneDiscoverDataModel.gene.like('IGHD%'),
-        ImmuneDiscoverDataModel.gene.like('IGHJ%'),
+        ~in_plot_loci(),
     )
 
 def sample_names(rows, limit = 10):
@@ -63,9 +70,31 @@ def amino_acid_coverage_problems():
     if unexpected:
         problems.append(
             str(len(unexpected)) + " allele(s) have db_name_AA set but are never translated"
-            " (flanking, *DEL, IGHD or IGHJ): " + sample_names(unexpected))
+            " (a flanking variant, a *DEL, or a gene outside the plotted V loci): "
+            + sample_names(unexpected))
 
     return problems
+
+def locus_problems():
+    """Every locus in the data must be one the app knows how to present.
+
+    Deriving "never translated" from PLOT_LOCI means an unrecognised locus is treated as
+    untranslated and left out of the plots without complaint, which is consistent but
+    silent. A locus nobody has decided about is a change the research group should have
+    announced, so it is reported here - with the right diagnosis, rather than as a
+    translation problem.
+    """
+    locus = func.substr(ImmuneDiscoverDataModel.gene, 1, LOCUS_PREFIX_LENGTH)
+    in_data = {row[0] for row in
+               ImmuneDiscoverDataModel.query.with_entities(locus).distinct().all()}
+    unknown = sorted(in_data - set(KNOWN_LOCI))
+
+    if not unknown:
+        return []
+
+    return ["Unknown locus/loci " + ", ".join(unknown) + ". Add to KNOWN_LOCI in "
+            "repositories/filters.py once it is decided whether they should be plotted, "
+            "which also decides whether their alleles are expected to be translated"]
 
 def population_problems():
     """Every population in the data must appear in the hardcoded display order.
@@ -120,7 +149,8 @@ def validate_loaded_data():
     Every check runs before anything is raised, so one crash reports everything that needs
     fixing rather than one problem per restart.
     """
-    problems = (amino_acid_coverage_problems()
+    problems = (locus_problems()
+                + amino_acid_coverage_problems()
                 + population_problems()
                 + allele_resolution_problems())
 

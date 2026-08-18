@@ -125,6 +125,13 @@ def load_tsv_to_db():
             
     for file in tsv_files:
         if file not in loaded_files:
+          # One transaction per file. The batches below used to be committed as they were
+          # built, so an IntegrityError partway through left the earlier batches committed -
+          # which recorded the file in loaded_from_tsv, so every later startup skipped it and
+          # the data stayed silently truncated. Flushing keeps memory bounded the same way
+          # while leaving the whole file to a single commit, so a failure anywhere rolls the
+          # file back completely and it is re-read on the next start.
+          try:
             with open(data_in_dir+file, encoding='utf-8', newline='') as tsv_file:
                 tsvreader = csv.DictReader(tsv_file, delimiter='\t')
 
@@ -202,19 +209,18 @@ def load_tsv_to_db():
                     
                     if len(batch) >= batch_size:
                         db.session.bulk_save_objects(batch)
-                        db.session.commit()
+                        db.session.flush()
                         batch = []
 
                 if batch:
                     db.session.bulk_save_objects(batch)
-                try:
-                    db.session.commit()
-                except IntegrityError as e:
-                    db.session.rollback()
-                    raise SourceDataError(
-                        file + " duplicates rows already in the database and was not "
-                        "loaded. Every row must be a unique combination of case, db_name, "
-                        "gene and flank_index." ) from e
+                db.session.commit()
+          except IntegrityError as e:
+            db.session.rollback()
+            raise SourceDataError(
+                file + " duplicates rows already in the database and was not loaded. "
+                "Every row must be a unique combination of case, db_name, gene and "
+                "flank_index." ) from e
 
     # Validated here rather than by the caller so that no code path can load data without
     # checking it - the pytest fixtures call this function directly rather than going

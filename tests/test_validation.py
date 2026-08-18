@@ -131,3 +131,29 @@ def test_flanking_variants_are_allowed_to_lack_amino_acid_data(app):
     assert flanking is not None, "mock data no longer has a flanking row to cover this"
     assert flanking.db_name_AA is None
     validate_loaded_data()
+
+
+def test_rejects_an_unrecognised_locus(app):
+    # Deriving "never translated" from PLOT_LOCI means an unknown locus is treated as
+    # untranslated and quietly left out of the plots. That is consistent but silent, so the
+    # locus itself is checked - and reported as an unknown locus rather than mis-reported as
+    # a translation problem, which is what the hardcoded IGHD/IGHJ list used to do.
+    add_row(db_name="TRGJ1*01", gene="TRGJ1", allele="01", db_name_AA=None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "Unknown locus/loci TRGJ" in message
+    assert "should be translated" not in message, "wrong diagnosis for a J locus"
+
+
+def test_a_translated_locus_is_still_checked(app):
+    # The derivation has not simply stopped checking: a V gene of a known locus without
+    # amino acid data is still a problem.
+    set_amino_acid_name(TRANSLATED_ALLELE, None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    assert "should be translated" in str(raised.value)

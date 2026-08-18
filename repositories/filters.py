@@ -21,8 +21,25 @@ from sqlalchemy import or_
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 
-# Loci offered as plot / MSA selections
+# Loci offered as plot / MSA selections. These are the V genes, which is also exactly the
+# set whose alleles have an amino acid sequence - V genes are translated, D and J genes are
+# not - so loaders/validation.py derives "never translated" from this rather than listing
+# the other loci separately. Keeping one definition means a locus that turns up in future
+# source data cannot be plotted by one rule and expected to be translated by another.
 PLOT_LOCI = ("IGHV", "TRGV")
+
+# Every locus the source data is known to contain. PLOT_LOCI is the subset that is plotted;
+# the rest are loaded for the FASTA downloads. A locus outside this list means the source
+# data has gained something nobody has decided how to present, which loaders/validation.py
+# reports rather than quietly leaving out of every plot.
+KNOWN_LOCI = ("IGHV", "IGHD", "IGHJ", "TRGV")
+
+# Gene names are prefixed with their locus, e.g. IGHV1-2, IGHD5-18/5-5, TRGV9.
+LOCUS_PREFIX_LENGTH = 4
+
+def in_plot_loci():
+    """True for rows belonging to a locus that is plotted, and therefore translated."""
+    return or_(*(ImmuneDiscoverDataModel.gene.like(locus + '%') for locus in PLOT_LOCI))
 
 def plot_selection_criteria():
     """Criteria restricting a query to the rows eligible for plots and MSA.
@@ -31,5 +48,5 @@ def plot_selection_criteria():
     """
     return (
         ~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True),
-        or_(*(ImmuneDiscoverDataModel.gene.like(locus + '%') for locus in PLOT_LOCI)),
+        in_plot_loci(),
     )
