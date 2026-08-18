@@ -10,6 +10,13 @@ def get_igSNPer_data(allele_name):
     ImmuneDiscoverDataModel.db_name
     ).where(ImmuneDiscoverDataModel.db_name == allele_name).distinct().all()
 
+    # An allele that is not in the data at all yields no rows, which is different from an
+    # allele that is present but has no IgSNPer columns (handled below). Returning {} here
+    # follows the other repository functions and lets the resource answer with a 404; the
+    # index below used to raise IndexError and surface as a 500.
+    if not igSNPer_data:
+        return {}
+
     # Result from db should be on the form [(score, SNPs, allele_name)].
     # If current allele has no associated igSNPer data, the result should be [(None, None, allele_name)]
     # As far as I understand, it should not be possible to have a score without SNPs and vice versa,

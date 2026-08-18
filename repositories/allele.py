@@ -1,8 +1,24 @@
 # Scripts relating to fetching allele data from db
 
+from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from repositories.filters import plot_selection_criteria
 from utils.regex import plot_options_regex
+
+# Whether an allele exists and is one the plots cover. Asked of the data rather than of the
+# dictionaries pre-calculated at startup, because those are only populated in prod - reading
+# plottability off them made the same request 404 in prod and return an all-zero plot under
+# debug and pytest, which left the 404 impossible to cover with a test.
+def is_plottable_allele(allele_name, plot_type):
+    if plot_type == "genomic":
+        column = ImmuneDiscoverDataModel.db_name
+    elif plot_type == "aminoacid":
+        column = ImmuneDiscoverDataModel.db_name_AA
+
+    return db.session.query(
+        ImmuneDiscoverDataModel.query.with_entities(ImmuneDiscoverDataModel.id
+            ).filter(column == allele_name).filter(*plot_selection_criteria()).exists()
+    ).scalar()
 
 def get_allele_sequence(allele_name):
     allele_data = ImmuneDiscoverDataModel.query.with_entities(

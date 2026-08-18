@@ -83,6 +83,12 @@ def frequency_data(allele_name, precalculated, population_type, plot_type):
             abort(404, message="No plot data for the requested allele.")
         return precalculated[allele_name]
 
+    # Nothing is pre-calculated under debug or pytest, so plottability is asked of the data
+    # instead. Without this the same request answered 404 in prod and 200 with an all-zero
+    # plot here, and the 404 could not be covered by a test.
+    if not is_plottable_allele(allele_name, plot_type):
+        abort(404, message="No plot data for the requested allele.")
+
     return calculate_frequencies(allele_name, population_type, plot_type)
 
 @blp.route("/data/frequencies/superpopulations")
@@ -117,14 +123,18 @@ def get_subpopulation_aminoacid_frequencies(args):
     return frequency_data(args["aa_allele_name"], aminoacid_allele_population_frequencies,
                           "population", "aminoacid")
 
-# The four table downloads and the three FASTA downloads return a file rather than JSON,
-# so they declare a content type instead of a response schema.
-def tsv_attachment(body, download_name):
+# The four table downloads and the three FASTA downloads return a file rather than JSON, so
+# they have no response schema. The content type has to be passed to send_file to reach the
+# response: blp.response(content_type=...) only labels the body in the OpenAPI document when
+# there is a schema to label, so on its own it set nothing and documented nothing - the FASTA
+# downloads were served as application/octet-stream because mimetypes does not know '.fasta'.
+def file_attachment(body, download_name, content_type):
     # send_file expects bytes rather than str
     buffer = BytesIO()
     buffer.write(str.encode(body))
     buffer.seek(0)
-    return send_file(buffer, as_attachment=True, download_name=download_name)
+    return send_file(buffer, as_attachment=True, download_name=download_name,
+                     mimetype=content_type)
 
 @blp.route("/data/frequencies/table/allele")
 @api_key_required
@@ -132,8 +142,8 @@ def tsv_attachment(body, download_name):
 @blp.response(200, content_type=TSV_CONTENT_TYPE)
 def get_allele_frequencies_table(args):
     allele_name = args["allele_name"]
-    return tsv_attachment(create_frequencies_table(allele_name, "genomic"),
-                          allele_name + '_frequencies_genomic.tsv')
+    return file_attachment(create_frequencies_table(allele_name, "genomic"),
+                           allele_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
 
 @blp.route("/data/aminoacidfrequencies/table/allele")
 @api_key_required
@@ -141,8 +151,8 @@ def get_allele_frequencies_table(args):
 @blp.response(200, content_type=TSV_CONTENT_TYPE)
 def get_aminoacid_allele_frequencies_table(args):
     aa_allele_name = args["aa_allele_name"]
-    return tsv_attachment(create_frequencies_table(aa_allele_name, "aminoacid"),
-                          aa_allele_name + '_frequencies_aminoacid.tsv')
+    return file_attachment(create_frequencies_table(aa_allele_name, "aminoacid"),
+                           aa_allele_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
 
 @blp.route("/data/frequencies/table/gene")
 @api_key_required
@@ -150,8 +160,8 @@ def get_aminoacid_allele_frequencies_table(args):
 @blp.response(200, content_type=TSV_CONTENT_TYPE)
 def get_gene_frequencies_table(args):
     gene_name = args["gene_name"]
-    return tsv_attachment(create_frequencies_table(gene_name, "genomic", full_gene=True),
-                          gene_name + '_frequencies_genomic.tsv')
+    return file_attachment(create_frequencies_table(gene_name, "genomic", full_gene=True),
+                           gene_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
 
 @blp.route("/data/aminoacidfrequencies/table/gene")
 @api_key_required
@@ -159,15 +169,18 @@ def get_gene_frequencies_table(args):
 @blp.response(200, content_type=TSV_CONTENT_TYPE)
 def get_aminoacid_gene_frequencies_table(args):
     aa_gene_name = args["aa_gene_name"]
-    return tsv_attachment(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True),
-                          aa_gene_name + '_frequencies_aminoacid.tsv')
+    return file_attachment(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True),
+                           aa_gene_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
 
 @blp.route("/data/igsnperdata")
 @api_key_required
 @blp.arguments(AlleleNameArgs, location="query")
 @blp.response(200, IgSNPerSchema)
 def get_igsnper_data(args):
-    return get_igSNPer_data(args["allele_name"])
+    data = get_igSNPer_data(args["allele_name"])
+    if not data:
+        abort(404, message="No IgSNPer data for the requested allele.")
+    return data
 
 @blp.route("/data/aminoacidalleles")
 @api_key_required
@@ -218,8 +231,8 @@ def get_sequence_search(args):
 @blp.response(200, content_type=FASTA_CONTENT_TYPE)
 def send_genomic_fasta(args):
     file_name = args["file_name"]
-    return tsv_attachment(generate_fasta(file_name, type="genomic"),
-                          file_name + '_genomic.fasta')
+    return file_attachment(generate_fasta(file_name, type="genomic"),
+                           file_name + '_genomic.fasta', FASTA_CONTENT_TYPE)
 
 @blp.route("/fasta/genomic_fl")
 @api_key_required
@@ -227,8 +240,8 @@ def send_genomic_fasta(args):
 @blp.response(200, content_type=FASTA_CONTENT_TYPE)
 def send_flanking_genomic_fasta(args):
     file_name = args["file_name"]
-    return tsv_attachment(generate_fasta(file_name, type="genomic_fl"),
-                          file_name + '_genomic_fl.fasta')
+    return file_attachment(generate_fasta(file_name, type="genomic_fl"),
+                           file_name + '_genomic_fl.fasta', FASTA_CONTENT_TYPE)
 
 @blp.route("/fasta/translated")
 @api_key_required
@@ -236,8 +249,8 @@ def send_flanking_genomic_fasta(args):
 @blp.response(200, content_type=FASTA_CONTENT_TYPE)
 def send_translated_fasta(args):
     file_name = args["file_name"]
-    return tsv_attachment(generate_fasta(file_name, type="translated"),
-                          file_name + '_translated.fasta')
+    return file_attachment(generate_fasta(file_name, type="translated"),
+                           file_name + '_translated.fasta', FASTA_CONTENT_TYPE)
 
 @blp.route("/checkapikey")
 @api_key_required

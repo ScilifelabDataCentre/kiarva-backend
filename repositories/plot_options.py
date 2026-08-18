@@ -24,7 +24,11 @@ def get_plot_options(selection):
     if (not select_allele):
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.gene
-            ).distinct().filter(ImmuneDiscoverDataModel.gene.like(selection+'%')).filter(*plot_selection_criteria()).all()
+            # startswith(autoescape=True) rather than like(selection + '%'): the selection
+            # comes from a request, and LIKE reads '_' as a single-character wildcard. A
+            # selection of "_" matched every gene. '%' is already rejected by the schema,
+            # but '_' cannot be - it is a legitimate character in allele names.
+            ).distinct().filter(ImmuneDiscoverDataModel.gene.startswith(selection, autoescape=True)).filter(*plot_selection_criteria()).all()
     else:
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.allele,

@@ -303,6 +303,48 @@ def test_calculate_all_frequencies_matches_per_allele(app):
             ), "mock data no longer covers the zero-carrier case this guards"
 
 
+def test_underscore_is_not_a_like_wildcard(client):
+    # LIKE reads '_' as a single-character wildcard. These endpoints matched on
+    # like(value + '%') with the raw parameter, so a value of "_" matched everything:
+    # /fasta/genomic returned 11 of the 14 sequences in the mock data instead of none.
+    # '_' cannot be rejected by the schema the way '%' is - it is legitimate in allele
+    # names like IGHV1-58*02_S3393 - so the query has to escape it.
+    res = get(client, url("/data/plotoptions", current_selection="_"))
+    assert res.status_code == 200
+    assert res.get_json() == []
+
+    for endpoint in ("/fasta/genomic", "/fasta/genomic_fl", "/fasta/translated"):
+        res = get(client, url(endpoint, file_name="_"))
+        assert res.status_code == 200
+        assert res.get_data(as_text=True) == "", f"{endpoint} treated '_' as a wildcard"
+
+    # A real prefix still matches, so the escaping has not broken ordinary lookups.
+    res = get(client, url("/fasta/genomic", file_name=TEST_GENE))
+    assert res.get_data(as_text=True).count(">") == 3
+
+
+def test_igsnperdata_unknown_allele(client):
+    # An allele that is not in the data at all yields no rows. Indexing the empty result
+    # raised IndexError and surfaced as a 500; it is a 404. This is distinct from an allele
+    # that exists with no IgSNPer columns, which is still a 200 - see the test below.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV9-99*99"))
+    assert res.status_code == 404
+
+
+def test_frequencies_unknown_allele_is_404_in_every_mode(client):
+    # Plottability used to be read off the dictionaries pre-calculated at startup, which
+    # are only populated in prod, so this request 404d there and returned a 200 all-zero
+    # plot under pytest - leaving the 404 impossible to cover. Both modes now agree.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        for allele in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: allele}))
+            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {allele}"
+
+    # The plottable allele still resolves.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+
+
 def test_igsnperdata(client):
     res = get(client, url("/data/igsnperdata", allele_name=TEST_ALLELE))
     assert res.status_code == 200
@@ -482,7 +524,9 @@ def test_sequence_search_escapes_like_wildcards(app):
 def test_send_fasta_genomic(client):
     res = get(client, url("/fasta/genomic", file_name="IGHV1-8"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # Alleles in name order, with the *DEL and flanking rows left out.
     assert res.get_data(as_text=True) == (
         ">IGHV1-8*01\nCTGGATTCACCTTTACTAGCTCTGCTATGCAGTGGGTGCGACAGGCTCGTGGACAACGCC\n"
@@ -495,7 +539,9 @@ def test_send_fasta_genomicwithflanking(client):
     # The frontend asks for a whole gene type at a time, as here.
     res = get(client, url("/fasta/genomic_fl", file_name="IGHV"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # Only the flanking rows, and their sequence includes the prefix and suffix.
     assert res.get_data(as_text=True) == (
         ">IGHV1-8*01_F1\nAGGTGCCCACTCC"
@@ -507,7 +553,9 @@ def test_send_fasta_genomicwithflanking(client):
 def test_send_fasta_translated(client):
     res = get(client, url("/fasta/translated", file_name="IGHV1-8"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # One entry per amino acid allele: the three IGHV1-8 alleles share one.
     assert res.get_data(as_text=True) == ">IGHV1-8*01\nLDSPLLALLCSGCDRLVDNA\n"
 

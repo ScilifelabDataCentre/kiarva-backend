@@ -1,4 +1,4 @@
-from repositories.allele import get_allele_sequence, get_db_name_from_options
+from repositories.allele import get_allele_sequence, get_db_name_from_options, is_plottable_allele
 from repositories.aminoacid import get_aminoacid_sequence, get_aminoacid_allele_list, get_aminoacid_top_allele
 from repositories.igsnper import get_igSNPer_data
 from repositories.plot_options import get_plot_options
