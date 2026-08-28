@@ -8,6 +8,8 @@
 import copy
 import os
 
+import pytest
+
 from urllib.parse import quote
 
 api_key_header = {"X-api-key": os.getenv("API_KEY")}
@@ -324,13 +326,15 @@ def test_underscore_is_not_a_like_wildcard(client):
 
 
 def test_igsnperdata_score_without_snps(client):
-    # A score with no SNPs is the majority shape in the real data, not a contradiction: the
-    # score counts uncommon SNPs, so 0.0 means there were none to list. Taking len() of the
-    # null SNP column raised TypeError, which answered 500 for 29 of the 732 plottable
-    # alleles. IGHV3-30*01 in the mock data has the same shape.
-    res = get(client, url("/data/igsnperdata", allele_name="IGHV3-30*01"))
+    # A score with no SNPs is the majority shape in the real data - 209,867 rows - and not a
+    # contradiction: the score counts uncommon SNPs, so 0.0 means there were none to list and
+    # the column is empty, which the loader stores as NULL. Taking len() of that null raised
+    # TypeError and answered 500 for 29 of the 732 plottable alleles. IGHV1-69*04_S7754 is
+    # the mock allele carrying this shape; asserting on an allele that has SNPs would pass
+    # either way and guard nothing.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV1-69*04_S7754"))
     assert res.status_code == 200
-    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": ["(:0,106791243)"]}
+    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": []}
 
 
 def test_openapi_documents_the_404s_and_the_api_key(client):
@@ -660,3 +664,43 @@ def test_gene_tables_list_each_allele_once(client):
         "IGHV3-30*01": 30,
         TWO_GENE_ALLELE: 30,
     }
+
+
+def test_openapi_spec_options_are_not_shared_between_apps():
+    # from_object copies the config class attribute by reference, and apispec's to_dict()
+    # ends by deep-merging the spec it just built into it. Shared, the first app's schemas
+    # accumulated there and won for every app built afterwards in the process.
+    from app import create_app
+    from config import TestConfig
+
+    first, second = create_app(TestConfig), create_app(TestConfig)
+    assert first.config["API_SPEC_OPTIONS"] is not second.config["API_SPEC_OPTIONS"]
+
+    with first.test_client() as client:
+        client.get("/openapi.json")
+
+    assert sorted(TestConfig.API_SPEC_OPTIONS["components"]) == ["securitySchemes"], \
+        "the config class attribute accumulated a built spec"
+
+
+def test_health_is_documented_as_needing_no_api_key(client):
+    # The requirement is declared at document root so every operation inherits it, but this
+    # route has no api_key_required. Anyone wiring a Kubernetes probe from the spec would
+    # build it to send a header it does not need.
+    spec = get(client, "/openapi.json").get_json()
+    assert spec["paths"]["/health"]["get"]["security"] == []
+    assert client.get("/health").status_code == 200
+
+
+def test_unknown_fasta_type_and_plot_type_raise(app):
+    # Both chose on the argument with if/elif and no else: the fasta branches left
+    # distinct_sequences unassigned and failed with UnboundLocalError, and the frequency
+    # table silently treated anything unrecognised as amino acid, answering 200 with a
+    # header-only tsv for a full gene.
+    from services.fasta_generation import generate_fasta
+    from services.frequencies import create_frequencies_table
+
+    with pytest.raises(ValueError, match="unknown fasta type"):
+        generate_fasta(TEST_GENE, type="genomicc")
+    with pytest.raises(ValueError, match="unknown plot_type"):
+        create_frequencies_table(TEST_GENE, "genomicc", full_gene=True)

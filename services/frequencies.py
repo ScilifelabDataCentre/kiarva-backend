@@ -177,6 +177,10 @@ def calculate_all_frequencies(population_type, plot_type):
 # create a .tsv formated table with frequency data for the requested allele/gene and type (genomic or amino acid),
 # which can then be downloaded by a user.
 def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
+    # Validates plot_type up front. The branches below choose on it with if/elif and if/else,
+    # so an unrecognised value silently produced a header-only tsv for a full gene and was
+    # treated as amino acid everywhere else.
+    allele_column(plot_type)
 
     alleles = []
 

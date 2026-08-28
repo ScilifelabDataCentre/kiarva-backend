@@ -114,10 +114,14 @@ def unpack_compressed_tsv_files(data_dir):
                 print("Password incorrect/not found for " + path)
 
 # Loading one file is its own function so the whole of it sits inside a single try in the
-# caller. The batches below flush rather than commit, so nothing this writes is visible
-# until load_tsv_to_db() commits: a failure anywhere leaves the file entirely unloaded and
-# therefore absent from loaded_from_tsv, so the next start reads it again instead of
-# skipping it as already done.
+# caller, which is where the one commit for the file lives. Nothing here commits, so nothing
+# it writes is visible until that commit succeeds - a file that fails partway is absent from
+# loaded_from_tsv and the next start reads it again instead of skipping it as already done.
+#
+# The memory bound comes from the batch size, which caps how many objects are built at once.
+# bulk_save_objects() emits its own INSERTs into the open transaction, so there is nothing
+# pending for a flush to write - an explicit flush here measured identically, 78 MB either
+# way, and the suite passed with it deleted.
 def load_one_tsv(data_in_dir, file):
     with open(data_in_dir+file, encoding='utf-8', newline='') as tsv_file:
         tsvreader = csv.DictReader(tsv_file, delimiter='\t')
@@ -196,12 +200,10 @@ def load_one_tsv(data_in_dir, file):
 
             if len(batch) >= batch_size:
                 db.session.bulk_save_objects(batch)
-                db.session.flush()
                 batch = []
 
         if batch:
             db.session.bulk_save_objects(batch)
-            db.session.flush()
 
 # if db is set up - load all tsv files which have not yet been loaded
 def load_tsv_to_db():
@@ -230,6 +232,11 @@ def load_tsv_to_db():
             # IntegrityError partway through left the earlier batches committed, which
             # recorded the file in loaded_from_tsv - so every later startup skipped it and
             # the data stayed silently truncated.
+            #
+            # Rolled back on anything, not only IntegrityError: a missing column, a
+            # non-numeric flank_index or a case value with too few parts raises from inside
+            # load_one_tsv, and leaving those rows in an open transaction hands the next
+            # user of the session a failed one.
             try:
                 load_one_tsv(data_in_dir, file)
                 db.session.commit()
@@ -239,6 +246,9 @@ def load_tsv_to_db():
                     file + " duplicates rows already in the database and was not loaded. "
                     "Every row must be a unique combination of case, db_name, gene and "
                     "flank_index." ) from e
+            except Exception:
+                db.session.rollback()
+                raise
 
     # Validated here rather than by the caller so that no code path can load data without
     # checking it - the pytest fixtures call this function directly rather than going
