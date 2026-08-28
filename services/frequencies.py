@@ -114,7 +114,15 @@ def frequency_entries(pop_totals, cases_with_allele, pop_order):
         for pop in pop_order if pop in pop_totals
     ]
 
-# calculate the frequency that an allele or aminoacid appears in a population, alt a superpopulation
+# Calculate the frequency that an allele or aminoacid appears in a population, alt a
+# superpopulation.
+#
+# Nothing in the request path calls this: every response is served from the dictionaries
+# calculate_all_frequencies() fills at startup. It is kept deliberately, as the reference
+# implementation test_calculate_all_frequencies_matches_per_allele compares that bulk query
+# against - the value of that test is that the two are arrived at independently, one allele
+# at a time here against one GROUP BY there, and it is what caught a filtered amino acid
+# denominator that no other check would have. Do not delete it as unused.
 def calculate_frequencies(allele_name, population_type, plot_type):
     db_name_column = allele_column(plot_type)
     pop_order = population_display_order(population_type)
@@ -177,6 +185,19 @@ def calculate_all_frequencies(population_type, plot_type):
 # create a .tsv formated table with frequency data for the requested allele/gene and type (genomic or amino acid),
 # which can then be downloaded by a user.
 def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
+    """Build the downloadable tsv, or return None if there is nothing to report.
+
+    Everything reported comes from the dictionaries pre-calculated at startup, so the
+    alleles this can describe are exactly the alleles that can be plotted. None means the
+    caller asked for something outside that - an allele or gene that is not plottable, or
+    not in the data at all - and the resource turns it into a 404.
+    """
+    if plot_type == "genomic":
+        superpop_cache = allele_superpopulation_frequencies
+        subpop_cache = allele_population_frequencies
+    else:
+        superpop_cache = aminoacid_allele_superpopulation_frequencies
+        subpop_cache = aminoacid_allele_population_frequencies
 
     alleles = []
 
@@ -190,7 +211,7 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
         if plot_type == "genomic":
             allele_data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.db_name,
-            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).distinct().all()
+            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(*plot_selection_criteria()).distinct().all()
 
             for item in allele_data:
                 alleles.append({'allele': item[0]})
@@ -202,7 +223,7 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
             allele_data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.db_name_AA,
             ImmuneDiscoverDataModel.db_name_AA_list,
-            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(ImmuneDiscoverDataModel.db_name_AA != None).distinct().all()
+            ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(allele_or_gene))).filter(ImmuneDiscoverDataModel.db_name_AA != None).filter(*plot_selection_criteria()).distinct().all()
 
             for item in allele_data:
                 # split on second item to get aa_list in form ['aa1','aa2] instead of 'aa1,aa2'
@@ -211,6 +232,10 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
     # if single allele, just use requested allele name
     else:
         alleles = [{'allele': allele_or_gene}]
+
+    # A gene with no plottable alleles, or an allele that is not one, has no table.
+    if not alleles or any(entry['allele'] not in superpop_cache for entry in alleles):
+        return None
 
     plot_data_all_alleles = []
 
@@ -239,30 +264,12 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
                 allele_name = get_aminoacid_top_allele(allele_name)['allele_aa']
                 aa_list = get_aminoacid_allele_list(allele_name)['aa_allele_list']
 
-        plot_data_subpops = {}
-        plot_data_superpops = {}
-        if plot_type == "genomic":
-            superpop_cache = allele_superpopulation_frequencies
-            subpop_cache = allele_population_frequencies
-        else:
-            superpop_cache = aminoacid_allele_superpopulation_frequencies
-            subpop_cache = aminoacid_allele_population_frequencies
-
-        # If running on prod we have population frequencies pre-calculated in dictionaries,
-        # use them directly. Only the plottable alleles are pre-calculated though, and a
-        # download can legitimately ask for one that is not - a flanking ('_F') variant, or
-        # an IGHD/IGHJ allele - so fall back to calculating those here. Under debug and
-        # testing nothing is pre-loaded and everything is calculated on demand.
-        if not current_app.debug and not current_app.config.get("TESTING") and allele_name in superpop_cache:
-            # Copied, not referenced: the loop below writes 'allele', 'superpopulation' and
-            # 'collapsed_translated_sequence' into each entry, which would otherwise mutate
-            # the cached dictionaries in place and leak those keys into every later response
-            # from the frequency plot endpoints.
-            plot_data_superpops = [dict(entry) for entry in superpop_cache[allele_name]]
-            plot_data_subpops = [dict(entry) for entry in subpop_cache[allele_name]]
-        else:
-            plot_data_superpops = calculate_frequencies(allele_name, "superpopulation", plot_type)
-            plot_data_subpops = calculate_frequencies(allele_name, "population", plot_type)
+        # Copied, not referenced: the loop below writes 'allele', 'superpopulation' and
+        # 'collapsed_translated_sequence' into each entry, which would otherwise mutate the
+        # pre-calculated dictionaries in place and leak those keys into every later response
+        # from the frequency plot endpoints.
+        plot_data_superpops = [dict(entry) for entry in superpop_cache[allele_name]]
+        plot_data_subpops = [dict(entry) for entry in subpop_cache[allele_name]]
 
         # assuming for now that we do not keep "ALL". If it later turns out that we need to show the aggregated
         # "ALL" data, we need to rename them to show for each one if it's referring to aggregated 

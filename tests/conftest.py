@@ -5,7 +5,10 @@ import pytest
 from app import create_app, db
 from config import TestConfig
 from tests import generate_mock_data
-from loaders import load_tsv_to_db
+from loaders import load_plot_data_to_dict, load_tsv_to_db
+from constants import (allele_population_frequencies, allele_superpopulation_frequencies,
+                       aminoacid_allele_population_frequencies,
+                       aminoacid_allele_superpopulation_frequencies)
 from constants import ROOT_DIR
 
 @pytest.fixture
@@ -17,7 +20,16 @@ def app():
     with app.app_context():
         db.create_all()
         load_tsv_to_db()
+        # The pre-load runs here too, so tests exercise the same path production serves
+        # from rather than a second implementation only they ever reach.
+        load_plot_data_to_dict()
         yield app
+        # constants.py exposes these as module-level dictionaries, so they outlive the app
+        # and would otherwise carry one test's alleles into the next.
+        for cache in (allele_superpopulation_frequencies, allele_population_frequencies,
+                      aminoacid_allele_superpopulation_frequencies,
+                      aminoacid_allele_population_frequencies):
+            cache.clear()
         db.session.remove()
         db.drop_all()
 

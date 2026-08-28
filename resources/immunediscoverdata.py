@@ -10,7 +10,7 @@
 
 from io import BytesIO
 from flask_smorest import Blueprint, abort
-from flask import current_app, send_file
+from flask import send_file
 
 from security import api_key_required
 from repositories import *
@@ -74,26 +74,20 @@ def get_db_name(args):
     gene, allele = selection
     return {"db_name": get_db_name_from_options(gene, allele)}
 
-# The four frequency endpoints below all have the same shape: take the allele name from
-# the validated query arguments, then either serve it from the dict pre-calculated at
-# startup (prod) or calculate it on the spot (debug and testing, where the pre-load is
-# skipped).
-def frequency_data(allele_name, precalculated, population_type, plot_type):
-    if not current_app.debug and not current_app.config.get("TESTING"):
-        # A miss means the allele is not plottable: a flanking ('_F') variant, an
-        # IGHD/IGHJ allele, or a name that is not in the data at all. None of those
-        # are pre-calculated, and the resulting KeyError used to surface as a 500.
-        if allele_name not in precalculated:
-            abort(404, message="No plot data for the requested allele.")
-        return precalculated[allele_name]
-
-    # Nothing is pre-calculated under debug or pytest, so plottability is asked of the data
-    # instead. Without this the same request answered 404 in prod and 200 with an all-zero
-    # plot here, and the 404 could not be covered by a test.
-    if not is_plottable_allele(allele_name, plot_type):
+# The four frequency endpoints below all have the same shape: take the allele name from the
+# validated query arguments and serve it from the dictionary pre-calculated at startup.
+#
+# There is no separate on-demand path any more. The pre-load runs in every mode, so a
+# request is answered the same way under pytest, under 'flask run --debug' and in
+# production - which is what makes the miss below reachable by a test at all. It used to be
+# prod-only, so the same request 404d there and returned an all-zero plot everywhere else.
+def frequency_data(allele_name, precalculated):
+    # A miss means the allele is not plottable: a flanking ('_F') variant, an IGHD/IGHJ
+    # allele, or a name that is not in the data at all.
+    if allele_name not in precalculated:
         abort(404, message="No plot data for the requested allele.")
 
-    return calculate_frequencies(allele_name, population_type, plot_type)
+    return precalculated[allele_name]
 
 @blp.route("/data/frequencies/superpopulations")
 @api_key_required
@@ -101,8 +95,7 @@ def frequency_data(allele_name, precalculated, population_type, plot_type):
 @blp.response(200, FrequencySchema(many=True))
 @blp.alt_response(404, description="No plot data for the requested allele")
 def get_superpopulation_allele_frequencies(args):
-    return frequency_data(args["allele_name"], allele_superpopulation_frequencies,
-                          "superpopulation", "genomic")
+    return frequency_data(args["allele_name"], allele_superpopulation_frequencies)
 
 @blp.route("/data/aminoacidfrequencies/superpopulations")
 @api_key_required
@@ -110,8 +103,7 @@ def get_superpopulation_allele_frequencies(args):
 @blp.response(200, FrequencySchema(many=True))
 @blp.alt_response(404, description="No plot data for the requested allele")
 def get_superpopulation_aminoacid_frequencies(args):
-    return frequency_data(args["aa_allele_name"], aminoacid_allele_superpopulation_frequencies,
-                          "superpopulation", "aminoacid")
+    return frequency_data(args["aa_allele_name"], aminoacid_allele_superpopulation_frequencies)
 
 @blp.route("/data/frequencies/populations")
 @api_key_required
@@ -119,8 +111,7 @@ def get_superpopulation_aminoacid_frequencies(args):
 @blp.response(200, FrequencySchema(many=True))
 @blp.alt_response(404, description="No plot data for the requested allele")
 def get_subpopulation_allele_frequencies(args):
-    return frequency_data(args["allele_name"], allele_population_frequencies,
-                          "population", "genomic")
+    return frequency_data(args["allele_name"], allele_population_frequencies)
 
 @blp.route("/data/aminoacidfrequencies/populations")
 @api_key_required
@@ -128,8 +119,7 @@ def get_subpopulation_allele_frequencies(args):
 @blp.response(200, FrequencySchema(many=True))
 @blp.alt_response(404, description="No plot data for the requested allele")
 def get_subpopulation_aminoacid_frequencies(args):
-    return frequency_data(args["aa_allele_name"], aminoacid_allele_population_frequencies,
-                          "population", "aminoacid")
+    return frequency_data(args["aa_allele_name"], aminoacid_allele_population_frequencies)
 
 # The four table downloads and the three FASTA downloads return a file rather than JSON, so
 # they have no response schema. The content type is passed to send_file because that is what
@@ -143,45 +133,57 @@ def file_attachment(body, download_name, content_type):
     return send_file(buffer, as_attachment=True, download_name=download_name,
                      mimetype=content_type)
 
+# The four frequency table downloads. create_frequencies_table returns None when the
+# requested allele or gene is not one the plots cover, which is the same set the download is
+# offered for in the frontend - the option only appears once an allele has been selected to
+# plot.
+def frequency_table_attachment(name, plot_type, download_suffix, full_gene = False):
+    table = create_frequencies_table(name, plot_type, full_gene=full_gene)
+    if table is None:
+        abort(404, message="No frequency table for the requested "
+                           + ("gene" if full_gene else "allele") + ".")
+
+    return file_attachment(table, name + download_suffix, TSV_CONTENT_TYPE)
+
 @blp.route("/data/frequencies/table/allele")
 @api_key_required
 @blp.arguments(AlleleNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_allele_frequencies_table(args):
-    allele_name = args["allele_name"]
-    return file_attachment(create_frequencies_table(allele_name, "genomic"),
-                           allele_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["allele_name"], "genomic",
+                                      '_frequencies_genomic.tsv')
 
 @blp.route("/data/aminoacidfrequencies/table/allele")
 @api_key_required
 @blp.arguments(AminoAcidAlleleNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_aminoacid_allele_frequencies_table(args):
-    aa_allele_name = args["aa_allele_name"]
-    return file_attachment(create_frequencies_table(aa_allele_name, "aminoacid"),
-                           aa_allele_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["aa_allele_name"], "aminoacid",
+                                      '_frequencies_aminoacid.tsv')
 
 @blp.route("/data/frequencies/table/gene")
 @api_key_required
 @blp.arguments(GeneNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_gene_frequencies_table(args):
-    gene_name = args["gene_name"]
-    return file_attachment(create_frequencies_table(gene_name, "genomic", full_gene=True),
-                           gene_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["gene_name"], "genomic",
+                                      '_frequencies_genomic.tsv', full_gene=True)
 
 @blp.route("/data/aminoacidfrequencies/table/gene")
 @api_key_required
 @blp.arguments(AminoAcidGeneNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_aminoacid_gene_frequencies_table(args):
-    aa_gene_name = args["aa_gene_name"]
-    return file_attachment(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True),
-                           aa_gene_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["aa_gene_name"], "aminoacid",
+                                      '_frequencies_aminoacid.tsv', full_gene=True)
 
 @blp.route("/data/igsnperdata")
 @api_key_required

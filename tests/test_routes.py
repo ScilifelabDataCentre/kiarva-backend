@@ -219,46 +219,53 @@ def test_frequencies_malformed_allele_name(client):
     assert res.status_code == 200
 
 
-def test_frequency_table_prod_path(app):
-    # Under TESTING the table download always calculates frequencies on demand, so these
-    # two prod-only behaviours need the flag flipped to reach the branch that reads the
-    # dictionaries pre-loaded at startup.
-    from constants import allele_population_frequencies, allele_superpopulation_frequencies
-    from services.frequencies import calculate_frequencies, create_frequencies_table
+def test_frequency_table_does_not_mutate_the_precalculated_dicts(app):
+    # Building the tsv writes 'allele' and 'superpopulation' into each entry. Done in place,
+    # those keys leaked into every later response from the plot endpoints for that allele.
+    # No flag flipping needed any more: the dictionaries are the only source in every mode.
+    from constants import allele_superpopulation_frequencies
+    from services.frequencies import create_frequencies_table
 
-    allele_superpopulation_frequencies[TEST_ALLELE] = calculate_frequencies(
-        TEST_ALLELE, "superpopulation", "genomic")
-    allele_population_frequencies[TEST_ALLELE] = calculate_frequencies(
-        TEST_ALLELE, "population", "genomic")
     cached_before = copy.deepcopy(allele_superpopulation_frequencies[TEST_ALLELE])
 
-    app.config["TESTING"] = False
-    try:
-        from_cache = create_frequencies_table(TEST_ALLELE, "genomic")
-        cached_after = copy.deepcopy(allele_superpopulation_frequencies[TEST_ALLELE])
-        # Only plottable alleles are pre-calculated, so a download for a flanking variant
-        # has to fall back to calculating it rather than raising a KeyError.
-        flanking = create_frequencies_table(TEST_ALLELE + "_F1", "genomic")
-    finally:
-        app.config["TESTING"] = True
-        allele_superpopulation_frequencies.clear()
-        allele_population_frequencies.clear()
+    table = create_frequencies_table(TEST_ALLELE, "genomic")
 
-    # Building the tsv writes 'allele' and 'superpopulation' into each entry. Done in
-    # place, those keys would leak into every later response from the plot endpoints.
-    assert cached_after == cached_before
-
-    assert from_cache.splitlines()[0].split("\t") == [
+    assert allele_superpopulation_frequencies[TEST_ALLELE] == cached_before
+    assert table.splitlines()[0].split("\t") == [
         "allele", "population", "superpopulation", "frequency", "n",
     ]
-    assert len(flanking.splitlines()) == len(from_cache.splitlines())
+
+
+def test_frequency_tables_are_offered_only_for_plottable_alleles(client):
+    # The download option only appears in the frontend once an allele has been selected to
+    # plot, so the endpoint covers the same set. Everything reported comes from the
+    # pre-calculated dictionaries, so a non-plottable name has no table rather than a table
+    # of zeroes naming an allele that does not exist.
+    for endpoint, param in (
+        ("/data/frequencies/table/allele", "allele_name"),
+        ("/data/aminoacidfrequencies/table/allele", "aa_allele_name"),
+    ):
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+            assert absent not in res.get_data(as_text=True)
+
+    for endpoint, param in (
+        ("/data/frequencies/table/gene", "gene_name"),
+        ("/data/aminoacidfrequencies/table/gene", "aa_gene_name"),
+    ):
+        assert get(client, url(endpoint, **{param: TEST_GENE})).status_code == 200
+        for absent in ("IGHV9-99", "IGHD1-1"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
 
 
 def test_calculate_all_frequencies_matches_per_allele(app):
-    # Two implementations serve the same numbers: calculate_all_frequencies fills the
-    # dictionaries at startup in prod, calculate_frequencies answers requests directly
-    # under debug and testing. Nothing else keeps them in step, so compare them over
-    # every allele in the mock dataset.
+    # calculate_all_frequencies fills the dictionaries every response is served from.
+    # calculate_frequencies is the reference implementation it is checked against: one
+    # allele at a time against one GROUP BY, arrived at independently. Nothing else keeps
+    # them in step, so compare them over every allele in the mock dataset.
     from models.immunediscoverdata import ImmuneDiscoverDataModel
     from repositories.filters import plot_selection_criteria
     from services.frequencies import calculate_all_frequencies, calculate_frequencies

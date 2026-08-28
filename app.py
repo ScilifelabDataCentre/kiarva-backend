@@ -49,8 +49,7 @@ def create_app(config_class=None):
         inspector = inspect(db.engine)
         if "immunediscoverdata" in inspector.get_table_names():
             load_tsv_to_db()
-            if not app.debug and not app.config.get("TESTING"):
-                load_plot_data_to_dict()
+            load_plot_data_to_dict()
         else:
             # Not an error: the table does not exist yet on a first-time setup, before
             # 'flask db upgrade' has run.
