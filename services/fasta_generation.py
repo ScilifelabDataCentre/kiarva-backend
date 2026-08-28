@@ -14,6 +14,12 @@ from utils import dict_to_fasta_str
 # '%' is already rejected by the schema, but '_' cannot be - it is a legitimate character
 # in allele names.
 def generate_fasta(gene_segment, type = "genomic"):
+    if type not in ("genomic", "genomic_fl", "translated"):
+        # Raise rather than fall through the branches below leaving distinct_sequences
+        # unassigned, which failed with UnboundLocalError - an error about a local variable
+        # rather than about the argument that was wrong.
+        raise ValueError("unknown fasta type: " + repr(type))
+
     if type == "genomic":
         distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name,

@@ -35,7 +35,18 @@ PLOT_LOCI = ("IGHV", "TRGV")
 KNOWN_LOCI = ("IGHV", "IGHD", "IGHJ", "TRGV")
 
 # Gene names are prefixed with their locus, e.g. IGHV1-2, IGHD5-18/5-5, TRGV9.
-LOCUS_PREFIX_LENGTH = 4
+def locus_of(gene):
+    """The locus a gene name belongs to, or None if it is not one we know.
+
+    Matched against KNOWN_LOCI rather than sliced at a fixed width. Every locus here happens
+    to be four characters, but slicing means a shorter gene name yields a truncated string
+    that is in no list - so the service would refuse to boot citing a locus that does not
+    exist, which is the opposite of the clear diagnosis this check is for.
+    """
+    for locus in KNOWN_LOCI:
+        if gene.startswith(locus):
+            return locus
+    return None
 
 def allele_column(plot_type):
     """The column holding allele names for a plot type.

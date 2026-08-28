@@ -15,7 +15,7 @@ from sqlalchemy import func, or_
 
 from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
-from repositories.filters import KNOWN_LOCI, LOCUS_PREFIX_LENGTH, in_plot_loci
+from repositories.filters import KNOWN_LOCI, in_plot_loci, locus_of
 from services.frequencies import subpopulation_order, superpopulation_order
 
 class SourceDataError(Exception):
@@ -84,17 +84,40 @@ def locus_problems():
     announced, so it is reported here - with the right diagnosis, rather than as a
     translation problem.
     """
-    locus = func.substr(ImmuneDiscoverDataModel.gene, 1, LOCUS_PREFIX_LENGTH)
-    in_data = {row[0] for row in
-               ImmuneDiscoverDataModel.query.with_entities(locus).distinct().all()}
-    unknown = sorted(in_data - set(KNOWN_LOCI))
+    genes = {row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
+        ImmuneDiscoverDataModel.gene).distinct().all()}
+    unknown = sorted(gene for gene in genes if locus_of(gene) is None)
 
     if not unknown:
         return []
 
-    return ["Unknown locus/loci " + ", ".join(unknown) + ". Add to KNOWN_LOCI in "
-            "repositories/filters.py once it is decided whether they should be plotted, "
-            "which also decides whether their alleles are expected to be translated"]
+    return ["Gene(s) belonging to no known locus: " + sample_names([(g,) for g in unknown])
+            + ". Add the locus to KNOWN_LOCI in repositories/filters.py once it is decided "
+            "whether it should be plotted, which also decides whether its alleles are "
+            "expected to be translated"]
+
+def igsnper_consistency_problems():
+    """An allele's IgSNPer values must not differ between the rows carrying it.
+
+    The researchers look these up per allele name, so cohort cannot change them - which is
+    why get_igSNPer_data() can answer from the first row it gets back. It queries with
+    .distinct() and no ORDER BY, so if one allele ever carried two different values the row
+    that won would be whichever the query plan returned first, and a real score could
+    disappear silently. Zero alleles diverge today; this is what keeps that true.
+    """
+    def distinct_values(column):
+        return func.count(func.distinct(func.coalesce(column, "~")))
+
+    divergent = db.session.query(ImmuneDiscoverDataModel.db_name).group_by(
+        ImmuneDiscoverDataModel.db_name
+        ).having(or_(distinct_values(ImmuneDiscoverDataModel.IgSNPer_uncommon) > 1,
+                     distinct_values(ImmuneDiscoverDataModel.IgSNPer_SNPs) > 1)).all()
+
+    if not divergent:
+        return []
+
+    return [str(len(divergent)) + " allele(s) carry more than one set of IgSNPer values, so "
+            "which one is reported depends on the query plan: " + sample_names(divergent)]
 
 def population_problems():
     """Every population in the data must appear in the hardcoded display order.
@@ -147,12 +170,19 @@ def validate_loaded_data():
     """Check the loaded data, raising SourceDataError if anything is wrong.
 
     Every check runs before anything is raised, so one crash reports everything that needs
-    fixing rather than one problem per restart.
+    fixing rather than one problem per restart - but each problem is reported once. An
+    unrecognised locus makes its rows look untranslated too, so reporting the locus and
+    stopping there says one true thing rather than two overlapping ones about the same row.
     """
-    problems = (locus_problems()
-                + amino_acid_coverage_problems()
-                + population_problems()
-                + allele_resolution_problems())
+    unknown_locus = locus_problems()
+    if unknown_locus:
+        problems = (unknown_locus + igsnper_consistency_problems()
+                    + population_problems() + allele_resolution_problems())
+    else:
+        problems = (amino_acid_coverage_problems()
+                    + igsnper_consistency_problems()
+                    + population_problems()
+                    + allele_resolution_problems())
 
     if problems:
         raise SourceDataError(

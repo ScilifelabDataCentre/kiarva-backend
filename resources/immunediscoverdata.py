@@ -48,6 +48,10 @@ FILE_BODY = {"schema": {"type": "string", "format": "binary"}}
 blp = Blueprint("ImmuneDiscoverData", __name__, description="Operations on ImmuneDiscover Data")
 
 @blp.route("/health")
+# The api key requirement is declared at document root, so every operation inherits it.
+# This one has no api_key_required, and a Kubernetes probe wired from the spec would
+# otherwise be built to send a header it does not need.
+@blp.doc(security=[])
 @blp.response(200, HealthSchema)
 def health():
     return {"status": "ok"}

@@ -133,10 +133,10 @@ def test_flanking_variants_are_allowed_to_lack_amino_acid_data(app):
     validate_loaded_data()
 
 
-def test_rejects_an_unrecognised_locus(app):
+def test_rejects_a_gene_from_an_unrecognised_locus(app):
     # Deriving "never translated" from PLOT_LOCI means an unknown locus is treated as
     # untranslated and quietly left out of the plots. That is consistent but silent, so the
-    # locus itself is checked - and reported as an unknown locus rather than mis-reported as
+    # locus is checked itself - and reported as an unknown locus rather than mis-reported as
     # a translation problem, which is what the hardcoded IGHD/IGHJ list used to do.
     add_row(db_name="TRGJ1*01", gene="TRGJ1", allele="01", db_name_AA=None)
 
@@ -144,16 +144,48 @@ def test_rejects_an_unrecognised_locus(app):
         validate_loaded_data()
 
     message = str(raised.value)
-    assert "Unknown locus/loci TRGJ" in message
+    assert "no known locus: TRGJ1" in message
     assert "should be translated" not in message, "wrong diagnosis for a J locus"
 
 
-def test_a_translated_locus_is_still_checked(app):
-    # The derivation has not simply stopped checking: a V gene of a known locus without
-    # amino acid data is still a problem.
-    set_amino_acid_name(TRANSLATED_ALLELE, None)
+def test_an_unrecognised_locus_is_reported_once(app):
+    # A row from an unknown locus with db_name_AA set satisfies the amino acid check too, so
+    # it used to be reported twice - "breaks 2 assumption(s)" about one row, under two
+    # headings, one of which is the wrong diagnosis. The locus is the true problem.
+    add_row(db_name="TRGJ1*01", gene="TRGJ1", allele="01", db_name_AA="TRGJ1*01")
 
     with pytest.raises(SourceDataError) as raised:
         validate_loaded_data()
 
-    assert "should be translated" in str(raised.value)
+    message = str(raised.value)
+    assert "breaks 1 assumption(s)" in message
+    assert "no known locus: TRGJ1" in message
+    assert "never translated" not in message
+
+
+def test_a_gene_name_shorter_than_a_locus_prefix_is_not_misdiagnosed(app):
+    # The locus is matched against KNOWN_LOCI rather than sliced at a fixed width. Sliced, a
+    # short gene name yielded a truncated string that is in no list, so the crash cited a
+    # locus that does not exist.
+    add_row(db_name="IGH*01", gene="IGH", allele="01", db_name_AA=None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    assert "no known locus: IGH" in str(raised.value)
+
+
+def test_rejects_divergent_igsnper_values_for_one_allele(app):
+    # get_igSNPer_data answers from the first row a .distinct() query returns, with no
+    # ORDER BY. That is correct because the researchers look IgSNPer values up per allele
+    # name, so cohort cannot change them - but nothing enforced it, and one divergent row
+    # would make a real score disappear depending on the query plan.
+    add_row(db_name=TRANSLATED_ALLELE, gene="IGHV1-8", allele="01", case="case_XTRA_EUR",
+            db_name_AA=TRANSLATED_ALLELE)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert TRANSLATED_ALLELE in message
+    assert "more than one set of IgSNPer values" in message

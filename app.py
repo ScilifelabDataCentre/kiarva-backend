@@ -13,6 +13,8 @@
 #     yet, which is why the loader below has a branch for that and does not treat it as an
 #     error. It is needed on every fresh SQLite file and implies nothing about persistence.
 
+import copy
+
 from flask import Flask
 from flask_smorest import Api
 from flask_migrate import Migrate
@@ -30,6 +32,14 @@ def create_app(config_class=None):
     CORS(app, origins=["*"])
 
     app.config.from_object(config_class or 'config.Config')
+
+    # from_object copies the class attribute by reference, so every app built from a given
+    # config would share one API_SPEC_OPTIONS dict - and apispec's to_dict() ends by
+    # deep-merging the spec it just built into it. Left shared, the first app's schemas
+    # accumulate there and then win for every app built after it in the process: under
+    # pytest that leaks specs between tests, and under a threaded worker two concurrent
+    # /openapi.json requests merge into one object. Each app gets its own copy.
+    app.config["API_SPEC_OPTIONS"] = copy.deepcopy(app.config.get("API_SPEC_OPTIONS", {}))
 
     db.init_app(app)
     if not app.config.get("TESTING"):

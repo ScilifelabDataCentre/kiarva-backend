@@ -111,20 +111,35 @@ def test_missing_tsv_files_raises(loader_app):
     assert "No .tsv files found" in str(raised.value)
 
 
-def test_unknown_plot_type_raises_a_useful_error(loader_app):
-    # Three call sites chose their column with an if/elif and no else, so an unrecognised
-    # plot_type left the variable unassigned and failed one line later with
-    # UnboundLocalError - a 500 complaining about a local rather than about the argument.
-    from repositories.filters import allele_column
-    from services.frequencies import population_display_order
+def test_a_row_the_loader_cannot_parse_rolls_back(loader_app):
+    # Only IntegrityError used to be rolled back, so a malformed row escaped with rows
+    # already written into the open transaction. Nothing was committed, so no bad data
+    # survived - but the next user of the session got a failed transaction instead of a
+    # database.
+    _, in_dir = loader_app
+    # Loaded and committed on its own first, so the assertion below distinguishes a rollback
+    # of the failed file from a rollback of everything.
+    write_tsv(in_dir / "first.tsv", range(10))
+    load_tsv_to_db()
+    assert rows_from("first.tsv") == 10
 
-    for bad in ("genomicc", "", None):
-        with pytest.raises(ValueError, match="unknown plot_type"):
-            allele_column(bad)
-        with pytest.raises(ValueError, match="unknown population_type"):
-            population_display_order(bad)
+    # flank_index is read with int(float(...)), so a non-numeric value raises ValueError
+    # from inside load_one_tsv, after earlier rows have been written.
+    # The bad row has to land after a full batch, or bulk_save_objects never runs and there
+    # is nothing in the transaction to roll back.
+    with open(in_dir / "broken.tsv", "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS, delimiter="\t")
+        writer.writeheader()
+        for index in range(BATCH_SIZE, BATCH_SIZE * 2 + 100):
+            writer.writerow(row(index))
+        bad = row(BATCH_SIZE * 3)
+        bad["flank_index"] = "not-a-number"
+        writer.writerow(bad)
 
-    # The two real values still resolve.
-    assert allele_column("genomic") is not None
-    assert allele_column("aminoacid") is not None
-    assert population_display_order("superpopulation")[0] == "AFR"
+    with pytest.raises(ValueError):
+        load_tsv_to_db()
+
+    # Without the rollback the flushed rows are still visible inside the open transaction,
+    # so this reads back the partial load rather than nothing.
+    assert rows_from("broken.tsv") == 0
+    assert rows_from("first.tsv") == 10

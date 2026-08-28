@@ -182,13 +182,17 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
     caller asked for something outside that - an allele or gene that is not plottable, or
     not in the data at all - and the resource turns it into a 404.
     """
+    # Validated up front. The branches below choose on plot_type with if/elif and if/else,
+    # so an unrecognised value silently produced a header-only tsv for a full gene and was
+    # treated as amino acid everywhere else.
+    allele_column(plot_type)
+
     if plot_type == "genomic":
         superpop_cache = allele_superpopulation_frequencies
         subpop_cache = allele_population_frequencies
     else:
         superpop_cache = aminoacid_allele_superpopulation_frequencies
         subpop_cache = aminoacid_allele_population_frequencies
-
     alleles = []
 
     # if full gene is requested, create a query to fetch

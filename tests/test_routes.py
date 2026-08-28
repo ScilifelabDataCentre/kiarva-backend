@@ -8,6 +8,8 @@
 import copy
 import os
 
+import pytest
+
 from urllib.parse import quote
 
 api_key_header = {"X-api-key": os.getenv("API_KEY")}
@@ -252,6 +254,98 @@ def test_frequency_tables_are_offered_only_for_plottable_alleles(client):
         ("/data/frequencies/table/allele", "allele_name"),
         ("/data/aminoacidfrequencies/table/allele", "aa_allele_name"),
     ):
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+            assert absent not in res.get_data(as_text=True)
+
+    for endpoint, param in (
+        ("/data/frequencies/table/gene", "gene_name"),
+        ("/data/aminoacidfrequencies/table/gene", "aa_gene_name"),
+    ):
+        assert get(client, url(endpoint, **{param: TEST_GENE})).status_code == 200
+        for absent in ("IGHV9-99", "IGHD1-1"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+
+
+def test_underscore_is_not_a_like_wildcard(client):
+    # LIKE reads '_' as a single-character wildcard. These endpoints matched on
+    # like(value + '%') with the raw parameter, so a value of "_" matched everything:
+    # /fasta/genomic returned 11 of the 14 sequences in the mock data instead of none.
+    # '_' cannot be rejected by the schema the way '%' is - it is legitimate in allele
+    # names like IGHV1-58*02_S3393 - so the query has to escape it.
+    res = get(client, url("/data/plotoptions", current_selection="_"))
+    assert res.status_code == 200
+    assert res.get_json() == []
+
+    for endpoint in ("/fasta/genomic", "/fasta/genomic_fl", "/fasta/translated"):
+        res = get(client, url(endpoint, file_name="_"))
+        assert res.status_code == 200
+        assert res.get_data(as_text=True) == "", f"{endpoint} treated '_' as a wildcard"
+
+    # A real prefix still matches, so the escaping has not broken ordinary lookups.
+    res = get(client, url("/fasta/genomic", file_name=TEST_GENE))
+    assert res.get_data(as_text=True).count(">") == 3
+
+
+def test_igsnperdata_score_without_snps(client):
+    # A score with no SNPs is the majority shape in the real data - 209,867 rows - and not a
+    # contradiction: the score counts uncommon SNPs, so 0.0 means there were none to list and
+    # the column is empty, which the loader stores as NULL. Taking len() of that null raised
+    # TypeError and answered 500 for 29 of the 732 plottable alleles. IGHV1-69*04_S7754 is
+    # the mock allele carrying this shape; asserting on an allele that has SNPs would pass
+    # either way and guard nothing.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV1-69*04_S7754"))
+    assert res.status_code == 200
+    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": []}
+
+
+def test_openapi_documents_the_404s_and_the_api_key(client):
+    # The spec is what /swagger-ui renders. Without the security scheme the page offers no
+    # way to send X-api-key, so every "Try it out" comes back 400.
+    spec = get(client, "/openapi.json").get_json()
+
+    assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-api-key"
+    assert spec["security"] == [{"ApiKeyAuth": []}]
+
+    for path in (
+        "/data/frequencies/superpopulations",
+        "/data/frequencies/populations",
+        "/data/aminoacidfrequencies/superpopulations",
+        "/data/aminoacidfrequencies/populations",
+        "/data/igsnperdata",
+    ):
+        assert "404" in spec["paths"][path]["get"]["responses"], f"{path} does not document its 404"
+
+    # The downloads have no schema, so blp.response(content_type=...) documented nothing for
+    # them; the body is declared through blp.doc instead.
+    fasta = spec["paths"]["/fasta/genomic"]["get"]["responses"]["200"]
+    assert "text/x-fasta" in fasta["content"]
+    table = spec["paths"]["/data/frequencies/table/allele"]["get"]["responses"]["200"]
+    assert "text/tab-separated-values" in table["content"]
+
+
+def test_igsnperdata_unknown_allele(client):
+    # An allele that is not in the data at all yields no rows. Indexing the empty result
+    # raised IndexError and surfaced as a 500; it is a 404. This is distinct from an allele
+    # that exists with no IgSNPer columns, which is still a 200 - see the test below.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV9-99*99"))
+    assert res.status_code == 404
+
+
+def test_frequencies_unknown_allele_is_404_in_every_mode(client):
+    # Plottability used to be read off the dictionaries pre-calculated at startup, which
+    # are only populated in prod, so this request 404d there and returned a 200 all-zero
+    # plot under pytest - leaving the 404 impossible to cover. Both modes now agree.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        for allele in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: allele}))
+            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {allele}"
+
+    # The plottable allele still resolves.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
         assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
         for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
             res = get(client, url(endpoint, **{param: absent}))
@@ -548,3 +642,43 @@ def test_gene_tables_list_each_allele_once(client):
         "IGHV3-30*01": 30,
         TWO_GENE_ALLELE: 30,
     }
+
+
+def test_openapi_spec_options_are_not_shared_between_apps():
+    # from_object copies the config class attribute by reference, and apispec's to_dict()
+    # ends by deep-merging the spec it just built into it. Shared, the first app's schemas
+    # accumulated there and won for every app built afterwards in the process.
+    from app import create_app
+    from config import TestConfig
+
+    first, second = create_app(TestConfig), create_app(TestConfig)
+    assert first.config["API_SPEC_OPTIONS"] is not second.config["API_SPEC_OPTIONS"]
+
+    with first.test_client() as client:
+        client.get("/openapi.json")
+
+    assert sorted(TestConfig.API_SPEC_OPTIONS["components"]) == ["securitySchemes"], \
+        "the config class attribute accumulated a built spec"
+
+
+def test_health_is_documented_as_needing_no_api_key(client):
+    # The requirement is declared at document root so every operation inherits it, but this
+    # route has no api_key_required. Anyone wiring a Kubernetes probe from the spec would
+    # build it to send a header it does not need.
+    spec = get(client, "/openapi.json").get_json()
+    assert spec["paths"]["/health"]["get"]["security"] == []
+    assert client.get("/health").status_code == 200
+
+
+def test_unknown_fasta_type_and_plot_type_raise(app):
+    # Both chose on the argument with if/elif and no else: the fasta branches left
+    # distinct_sequences unassigned and failed with UnboundLocalError, and the frequency
+    # table silently treated anything unrecognised as amino acid, answering 200 with a
+    # header-only tsv for a full gene.
+    from services.fasta_generation import generate_fasta
+    from services.frequencies import create_frequencies_table
+
+    with pytest.raises(ValueError, match="unknown fasta type"):
+        generate_fasta(TEST_GENE, type="genomicc")
+    with pytest.raises(ValueError, match="unknown plot_type"):
+        create_frequencies_table(TEST_GENE, "genomicc", full_gene=True)
