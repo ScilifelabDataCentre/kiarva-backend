@@ -37,6 +37,20 @@ KNOWN_LOCI = ("IGHV", "IGHD", "IGHJ", "TRGV")
 # Gene names are prefixed with their locus, e.g. IGHV1-2, IGHD5-18/5-5, TRGV9.
 LOCUS_PREFIX_LENGTH = 4
 
+def allele_column(plot_type):
+    """The column holding allele names for a plot type.
+
+    Raises rather than falling off the end of an if/elif. Three call sites chose this
+    column that way, leaving the variable unassigned for an unrecognised plot_type - so
+    the next line raised UnboundLocalError and surfaced as a 500 complaining about a
+    local variable rather than about the argument.
+    """
+    if plot_type == "genomic":
+        return ImmuneDiscoverDataModel.db_name
+    if plot_type == "aminoacid":
+        return ImmuneDiscoverDataModel.db_name_AA
+    raise ValueError("unknown plot_type: " + repr(plot_type))
+
 def in_plot_loci():
     """True for rows belonging to a locus that is plotted, and therefore translated."""
     return or_(*(ImmuneDiscoverDataModel.gene.like(locus + '%') for locus in PLOT_LOCI))

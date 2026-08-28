@@ -323,6 +323,41 @@ def test_underscore_is_not_a_like_wildcard(client):
     assert res.get_data(as_text=True).count(">") == 3
 
 
+def test_igsnperdata_score_without_snps(client):
+    # A score with no SNPs is the majority shape in the real data, not a contradiction: the
+    # score counts uncommon SNPs, so 0.0 means there were none to list. Taking len() of the
+    # null SNP column raised TypeError, which answered 500 for 29 of the 732 plottable
+    # alleles. IGHV3-30*01 in the mock data has the same shape.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV3-30*01"))
+    assert res.status_code == 200
+    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": ["(:0,106791243)"]}
+
+
+def test_openapi_documents_the_404s_and_the_api_key(client):
+    # The spec is what /swagger-ui renders. Without the security scheme the page offers no
+    # way to send X-api-key, so every "Try it out" comes back 400.
+    spec = get(client, "/openapi.json").get_json()
+
+    assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-api-key"
+    assert spec["security"] == [{"ApiKeyAuth": []}]
+
+    for path in (
+        "/data/frequencies/superpopulations",
+        "/data/frequencies/populations",
+        "/data/aminoacidfrequencies/superpopulations",
+        "/data/aminoacidfrequencies/populations",
+        "/data/igsnperdata",
+    ):
+        assert "404" in spec["paths"][path]["get"]["responses"], f"{path} does not document its 404"
+
+    # The downloads have no schema, so blp.response(content_type=...) documented nothing for
+    # them; the body is declared through blp.doc instead.
+    fasta = spec["paths"]["/fasta/genomic"]["get"]["responses"]["200"]
+    assert "text/x-fasta" in fasta["content"]
+    table = spec["paths"]["/data/frequencies/table/allele"]["get"]["responses"]["200"]
+    assert "text/tab-separated-values" in table["content"]
+
+
 def test_igsnperdata_unknown_allele(client):
     # An allele that is not in the data at all yields no rows. Indexing the empty result
     # raised IndexError and surfaced as a 500; it is a 404. This is distinct from an allele

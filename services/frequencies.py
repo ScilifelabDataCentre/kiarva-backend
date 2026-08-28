@@ -9,7 +9,7 @@ from sqlalchemy import func
 from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from repositories.aminoacid import get_aminoacid_allele_list, get_aminoacid_top_allele
-from repositories.filters import plot_selection_criteria
+from repositories.filters import allele_column, plot_selection_criteria
 from repositories.population import get_populations
 
 from constants import allele_superpopulation_frequencies, allele_population_frequencies, aminoacid_allele_superpopulation_frequencies, aminoacid_allele_population_frequencies
@@ -53,6 +53,18 @@ subpopulation_order = [
     'PUR',
     'ALL'
 ]
+
+def population_display_order(population_type):
+    """The population order a frequency response is reported in.
+
+    Raises for the same reason as allele_column: chosen with an if/elif and no else, an
+    unrecognised population_type left the variable unassigned and failed one line later.
+    """
+    if population_type == "superpopulation":
+        return superpopulation_order
+    if population_type == "population":
+        return subpopulation_order
+    raise ValueError("unknown population_type: " + repr(population_type))
 
 # Key the per-population case totals are cached under. They are stored on the Flask app
 # rather than at module level because the pytest fixtures build one app per test, each
@@ -104,23 +116,16 @@ def frequency_entries(pop_totals, cases_with_allele, pop_order):
 
 # calculate the frequency that an allele or aminoacid appears in a population, alt a superpopulation
 def calculate_frequencies(allele_name, population_type, plot_type):
-    if plot_type == "genomic":
-        db_name = "db_name"
-    elif plot_type == "aminoacid":
-        db_name = "db_name_AA"
-
-    if population_type == "superpopulation":
-        pop_order = superpopulation_order
-    elif population_type == "population":
-        pop_order = subpopulation_order
+    db_name_column = allele_column(plot_type)
+    pop_order = population_display_order(population_type)
 
     pop_count = population_totals(population_type)
 
     cases_with_allele = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.case,
         getattr(ImmuneDiscoverDataModel, population_type),
-        getattr(ImmuneDiscoverDataModel, db_name)
-        ).where(getattr(ImmuneDiscoverDataModel, db_name) == allele_name).distinct().all()
+        db_name_column
+        ).where(db_name_column == allele_name).distinct().all()
 
     pop_with_allele_count = Counter(col[1] for col in cases_with_allele)
     pop_with_allele_count["ALL"] = sum(pop_with_allele_count.values())
@@ -135,15 +140,8 @@ def calculate_all_frequencies(population_type, plot_type):
     startup pre-load take tens of minutes: it re-read the whole table for each allele,
     and re-derived the same population totals every time.
     """
-    if plot_type == "genomic":
-        db_name_column = ImmuneDiscoverDataModel.db_name
-    elif plot_type == "aminoacid":
-        db_name_column = ImmuneDiscoverDataModel.db_name_AA
-
-    if population_type == "superpopulation":
-        pop_order = superpopulation_order
-    elif population_type == "population":
-        pop_order = subpopulation_order
+    db_name_column = allele_column(plot_type)
+    pop_order = population_display_order(population_type)
 
     # The denominator is deliberately not restricted to the rows selected below. It means
     # "how many individuals are in this population", so it covers the whole cohort - not

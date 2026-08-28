@@ -1,4 +1,17 @@
 # Setup script for Flask app
+#
+# The service is stateless by design. There is no PVC: DATABASE_URL defaults to a SQLite
+# file inside the container, and every pod rebuilds it from the TSVs in data/ on startup.
+# Nothing a request does writes to it - the app only ever reads, transforms and serves - so
+# a pod can be restarted at any time to get a clean database, and replacing the source data
+# is a matter of shipping a new image rather than migrating anything.
+#
+# Two consequences that are easy to misread as bugs:
+#   - Recording loaded files in loaded_from_tsv only skips work within one container's
+#     lifetime. A restart starts from an empty database and re-reads everything.
+#   - 'flask db upgrade' in docker/entrypoint.sh runs against a database that has no tables
+#     yet, which is why the loader below has a branch for that and does not treat it as an
+#     error. It is needed on every fresh SQLite file and implies nothing about persistence.
 
 from flask import Flask
 from flask_smorest import Api

@@ -109,3 +109,22 @@ def test_missing_tsv_files_raises(loader_app):
         load_tsv_to_db()
 
     assert "No .tsv files found" in str(raised.value)
+
+
+def test_unknown_plot_type_raises_a_useful_error(loader_app):
+    # Three call sites chose their column with an if/elif and no else, so an unrecognised
+    # plot_type left the variable unassigned and failed one line later with
+    # UnboundLocalError - a 500 complaining about a local rather than about the argument.
+    from repositories.filters import allele_column
+    from services.frequencies import population_display_order
+
+    for bad in ("genomicc", "", None):
+        with pytest.raises(ValueError, match="unknown plot_type"):
+            allele_column(bad)
+        with pytest.raises(ValueError, match="unknown population_type"):
+            population_display_order(bad)
+
+    # The two real values still resolve.
+    assert allele_column("genomic") is not None
+    assert allele_column("aminoacid") is not None
+    assert population_display_order("superpopulation")[0] == "AFR"
