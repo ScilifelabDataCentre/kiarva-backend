@@ -77,8 +77,8 @@ def population_totals(population_type):
 
     This is the denominator of every frequency: how many individuals a population
     contains, which has nothing to do with which allele is being asked about. It costs a
-    full scan of the table, and used to be re-run inside every calculate_frequencies()
-    call - thousands of times during the startup pre-load, for one unchanging result.
+    full scan of the table, and used to be re-run once per allele during the startup
+    pre-load - thousands of times, for one unchanging result.
 
     The data is read-only once loaded, so it is calculated once per app and cached.
     """
@@ -114,39 +114,29 @@ def frequency_entries(pop_totals, cases_with_allele, pop_order):
         for pop in pop_order if pop in pop_totals
     ]
 
-# Calculate the frequency that an allele or aminoacid appears in a population, alt a
-# superpopulation.
-#
-# Nothing in the request path calls this: every response is served from the dictionaries
-# calculate_all_frequencies() fills at startup. It is kept deliberately, as the reference
-# implementation test_calculate_all_frequencies_matches_per_allele compares that bulk query
-# against - the value of that test is that the two are arrived at independently, one allele
-# at a time here against one GROUP BY there, and it is what caught a filtered amino acid
-# denominator that no other check would have. Do not delete it as unused.
-def calculate_frequencies(allele_name, population_type, plot_type):
-    db_name_column = allele_column(plot_type)
-    pop_order = population_display_order(population_type)
-
-    pop_count = population_totals(population_type)
-
-    cases_with_allele = ImmuneDiscoverDataModel.query.with_entities(
-        ImmuneDiscoverDataModel.case,
-        getattr(ImmuneDiscoverDataModel, population_type),
-        db_name_column
-        ).where(db_name_column == allele_name).distinct().all()
-
-    pop_with_allele_count = Counter(col[1] for col in cases_with_allele)
-    pop_with_allele_count["ALL"] = sum(pop_with_allele_count.values())
-
-    return frequency_entries(pop_count, pop_with_allele_count, pop_order)
-
 def calculate_all_frequencies(population_type, plot_type):
     """Frequencies for every plottable allele at once, as {allele_name: [entries]}.
 
-    Produces exactly what calling calculate_frequencies() once per allele produces, but
-    in two queries rather than two per allele. That per-allele loop is what made the
-    startup pre-load take tens of minutes: it re-read the whole table for each allele,
-    and re-derived the same population totals every time.
+    Two queries for the whole dataset. This replaced a loop that called a single-allele
+    version once per allele, which re-read the whole table each time and re-derived the
+    same population totals with it - tens of minutes of startup for one unchanging result.
+
+    Two things here are easy to "tidy" into being wrong, and both are silent:
+
+    - The denominator must stay unfiltered. Restricting it to the rows selected below -
+      to individuals who carry an amino acid allele, say - inflates every amino acid
+      frequency. It reads like an oversight because the filter is right there on the
+      numerator, and on the real dataset the two happen to agree, because every one of the
+      2486 cases carries amino acid data. They do not agree in general: an individual who
+      carries only a deletion belongs in the denominator uncounted.
+    - A population no case carries the allele in must still be reported, as n=0. GROUP BY
+      returns no row for those at all, and 1094 of the 1450 genomic alleles are absent from
+      at least one superpopulation. In a plot a missing bar and a zero bar say different
+      things.
+
+    test_aminoacid_populationfrequencies and test_populationfrequencies are what hold both
+    of these: their exact ALL and MSL figures are 25/26 and 0/1 precisely because one case
+    in the mock data carries only a deletion.
     """
     db_name_column = allele_column(plot_type)
     pop_order = population_display_order(population_type)
@@ -157,8 +147,8 @@ def calculate_all_frequencies(population_type, plot_type):
     pop_count = population_totals(population_type)
 
     # One row per (allele, case, population), so that counting rows per
-    # (allele, population) counts distinct cases - what the DISTINCT in
-    # calculate_frequencies() does for a single allele.
+    # (allele, population) counts distinct cases rather than rows: an individual appears
+    # once per gene and flank position, not once overall.
     distinct_cases = ImmuneDiscoverDataModel.query.with_entities(
         db_name_column.label("allele"),
         ImmuneDiscoverDataModel.case,

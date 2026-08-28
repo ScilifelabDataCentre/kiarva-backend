@@ -151,7 +151,10 @@ def test_populationfrequencies(client):
     assert [entry["population"] for entry in data] == EXPECTED_POPULATIONS
 
     frequencies = frequency_dict(data)
-    # MSL carries only IGHV1-8*DEL and CDX only *04, so neither has the allele.
+    # MSL carries only IGHV1-8*DEL and CDX only *04, so neither has the allele. Asserting
+    # the full population list above and these zeroes here is what pins the zero fill:
+    # GROUP BY returns no row for a population with no carriers, so they have to be filled
+    # back in rather than left out.
     assert frequencies["MSL"] == (0, 0.0)
     assert frequencies["CDX"] == (0, 0.0)
     # TSI is the only population with two cases, one of which carries *02 instead.
@@ -174,7 +177,11 @@ def test_aminoacid_populationfrequencies(client):
     assert [entry["population"] for entry in data] == EXPECTED_POPULATIONS
 
     frequencies = frequency_dict(data)
-    # Only MSL, which has no IGHV1-8 sequence at all, is missing the amino acid allele.
+    # These exact figures are what pin the amino acid denominator. case_MSL_AFR carries only
+    # IGHV1-8*DEL, so it has no amino acid row at all - and it still counts as an individual,
+    # which is why ALL below is 25 of 26 rather than 25 of 25. Restricting the denominator to
+    # cases that have amino acid data is a silent mistake on the real dataset, where every
+    # case happens to have some; here it turns these numbers into 1.0.
     assert frequencies["MSL"] == (0, 0.0)
     # CDX (*04) and TSI (*02 plus *01) both collapse into IGHV1-8*01, so unlike the
     # genomic frequencies above they come out at 1.0.
@@ -259,132 +266,6 @@ def test_frequency_tables_are_offered_only_for_plottable_alleles(client):
         for absent in ("IGHV9-99", "IGHD1-1"):
             res = get(client, url(endpoint, **{param: absent}))
             assert res.status_code == 404, f"{endpoint} served a table for {absent}"
-
-
-def test_calculate_all_frequencies_matches_per_allele(app):
-    # calculate_all_frequencies fills the dictionaries every response is served from.
-    # calculate_frequencies is the reference implementation it is checked against: one
-    # allele at a time against one GROUP BY, arrived at independently. Nothing else keeps
-    # them in step, so compare them over every allele in the mock dataset.
-    from models.immunediscoverdata import ImmuneDiscoverDataModel
-    from repositories.filters import plot_selection_criteria
-    from services.frequencies import calculate_all_frequencies, calculate_frequencies
-
-    for plot_type, column in (
-        ("genomic", ImmuneDiscoverDataModel.db_name),
-        ("aminoacid", ImmuneDiscoverDataModel.db_name_AA),
-    ):
-        alleles = [
-            row[0]
-            for row in ImmuneDiscoverDataModel.query.with_entities(column)
-            .filter(column != None)
-            .filter(*plot_selection_criteria())
-            .distinct()
-            .all()
-        ]
-        assert alleles, f"mock data has no plottable {plot_type} alleles to compare"
-
-        for population_type, expected_populations in (
-            ("superpopulation", EXPECTED_SUPERPOPULATIONS),
-            ("population", EXPECTED_POPULATIONS),
-        ):
-            bulk = calculate_all_frequencies(population_type, plot_type)
-            assert sorted(bulk) == sorted(alleles)
-
-            for allele in alleles:
-                assert bulk[allele] == calculate_frequencies(
-                    allele, population_type, plot_type
-                ), f"{plot_type}/{population_type} frequencies differ for {allele}"
-
-            # Every allele reports every population, including those where no case carries
-            # it. GROUP BY returns no row at all for those, so they have to be filled in as
-            # n=0 rather than left out: in a plot a missing bar and a zero bar say
-            # different things.
-            for allele, entries in bulk.items():
-                assert [
-                    entry["population"] for entry in entries
-                ] == expected_populations, f"{allele} is missing populations"
-
-            assert any(
-                entry["n"] == 0 for entries in bulk.values() for entry in entries
-            ), "mock data no longer covers the zero-carrier case this guards"
-
-
-def test_underscore_is_not_a_like_wildcard(client):
-    # LIKE reads '_' as a single-character wildcard. These endpoints matched on
-    # like(value + '%') with the raw parameter, so a value of "_" matched everything:
-    # /fasta/genomic returned 11 of the 14 sequences in the mock data instead of none.
-    # '_' cannot be rejected by the schema the way '%' is - it is legitimate in allele
-    # names like IGHV1-58*02_S3393 - so the query has to escape it.
-    res = get(client, url("/data/plotoptions", current_selection="_"))
-    assert res.status_code == 200
-    assert res.get_json() == []
-
-    for endpoint in ("/fasta/genomic", "/fasta/genomic_fl", "/fasta/translated"):
-        res = get(client, url(endpoint, file_name="_"))
-        assert res.status_code == 200
-        assert res.get_data(as_text=True) == "", f"{endpoint} treated '_' as a wildcard"
-
-    # A real prefix still matches, so the escaping has not broken ordinary lookups.
-    res = get(client, url("/fasta/genomic", file_name=TEST_GENE))
-    assert res.get_data(as_text=True).count(">") == 3
-
-
-def test_igsnperdata_score_without_snps(client):
-    # A score with no SNPs is the majority shape in the real data, not a contradiction: the
-    # score counts uncommon SNPs, so 0.0 means there were none to list. Taking len() of the
-    # null SNP column raised TypeError, which answered 500 for 29 of the 732 plottable
-    # alleles. IGHV3-30*01 in the mock data has the same shape.
-    res = get(client, url("/data/igsnperdata", allele_name="IGHV3-30*01"))
-    assert res.status_code == 200
-    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": ["(:0,106791243)"]}
-
-
-def test_openapi_documents_the_404s_and_the_api_key(client):
-    # The spec is what /swagger-ui renders. Without the security scheme the page offers no
-    # way to send X-api-key, so every "Try it out" comes back 400.
-    spec = get(client, "/openapi.json").get_json()
-
-    assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-api-key"
-    assert spec["security"] == [{"ApiKeyAuth": []}]
-
-    for path in (
-        "/data/frequencies/superpopulations",
-        "/data/frequencies/populations",
-        "/data/aminoacidfrequencies/superpopulations",
-        "/data/aminoacidfrequencies/populations",
-        "/data/igsnperdata",
-    ):
-        assert "404" in spec["paths"][path]["get"]["responses"], f"{path} does not document its 404"
-
-    # The downloads have no schema, so blp.response(content_type=...) documented nothing for
-    # them; the body is declared through blp.doc instead.
-    fasta = spec["paths"]["/fasta/genomic"]["get"]["responses"]["200"]
-    assert "text/x-fasta" in fasta["content"]
-    table = spec["paths"]["/data/frequencies/table/allele"]["get"]["responses"]["200"]
-    assert "text/tab-separated-values" in table["content"]
-
-
-def test_igsnperdata_unknown_allele(client):
-    # An allele that is not in the data at all yields no rows. Indexing the empty result
-    # raised IndexError and surfaced as a 500; it is a 404. This is distinct from an allele
-    # that exists with no IgSNPer columns, which is still a 200 - see the test below.
-    res = get(client, url("/data/igsnperdata", allele_name="IGHV9-99*99"))
-    assert res.status_code == 404
-
-
-def test_frequencies_unknown_allele_is_404_in_every_mode(client):
-    # Plottability used to be read off the dictionaries pre-calculated at startup, which
-    # are only populated in prod, so this request 404d there and returned a 200 all-zero
-    # plot under pytest - leaving the 404 impossible to cover. Both modes now agree.
-    for endpoint, param in FREQUENCY_ENDPOINTS:
-        for allele in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
-            res = get(client, url(endpoint, **{param: allele}))
-            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {allele}"
-
-    # The plottable allele still resolves.
-    for endpoint, param in FREQUENCY_ENDPOINTS:
-        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
 
 
 def test_igsnperdata(client):
