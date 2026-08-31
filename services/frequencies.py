@@ -224,10 +224,23 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
                 alleles.append({'allele': item[0], 'aa_list': item[1].split(",")})
 
     # if single allele, just use requested allele name
-    else:
+    elif plot_type == "genomic":
         alleles = [{'allele': allele_or_gene}]
 
-    # A gene with no plottable alleles, or an allele that is not one, has no table.
+    else:
+        # The amino acid download is asked for by genomic allele name - that is what the
+        # frontend has resolved from the plot selection - so it has to be translated to the
+        # master amino acid allele it collapses into. 243 of the 732 plottable alleles are
+        # not their own master, so resolving this after the guard below rather than before it
+        # made every one of them a 404.
+        top_allele = get_aminoacid_top_allele(allele_or_gene)
+        if not top_allele:
+            return None
+        alleles = [{'allele': top_allele['allele_aa'],
+                    'aa_list': get_aminoacid_allele_list(top_allele['allele_aa'])['aa_allele_list']}]
+
+    # A gene with no plottable alleles, or an allele that is not one, has no table. Checked
+    # against the resolved names, which is what the caches are keyed on.
     if not alleles or any(entry['allele'] not in superpop_cache for entry in alleles):
         return None
 
@@ -250,13 +263,7 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
     for allele_data in alleles:
         allele_name = allele_data['allele']
         if plot_type == "aminoacid":
-            if full_gene:
-                aa_list = allele_data['aa_list']
-            else:
-                # if single allele, we did not fetch db_name_AA and db_name_AA_list in the query above,
-                # fetch them using our repository functions
-                allele_name = get_aminoacid_top_allele(allele_name)['allele_aa']
-                aa_list = get_aminoacid_allele_list(allele_name)['aa_allele_list']
+            aa_list = allele_data['aa_list']
 
         # Copied, not referenced: the loop below writes 'allele', 'superpopulation' and
         # 'collapsed_translated_sequence' into each entry, which would otherwise mutate the

@@ -1,7 +1,9 @@
-# set up pre-calculated allele population frequencies dict
-# for faster loading, only done in prod because it takes a long time
-# to load on startup. Running "flask run --debug" allows running without
-# pre-loading plots
+# Pre-calculates the allele population frequency dictionaries every response is served
+# from. Runs in every mode - production, "flask run --debug" and pytest alike - so a
+# request is answered the same way everywhere. It was prod-only while the calculation took
+# tens of minutes; two set-based queries brought that to about a second and a half on the
+# full dataset, and keeping the split cost more than it saved: the on-demand path was a
+# second implementation of the same numbers that only the tests ever ran.
 
 from constants import allele_superpopulation_frequencies, allele_population_frequencies, aminoacid_allele_superpopulation_frequencies, aminoacid_allele_population_frequencies
 from services import calculate_all_frequencies

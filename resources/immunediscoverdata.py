@@ -233,8 +233,13 @@ def get_next_selection_option(args):
 @api_key_required
 @blp.arguments(GeneNameArgs, location="query")
 @blp.response(200, AlignedSequenceSchema(many=True))
+@blp.alt_response(404, description="No sequences to align for the requested gene")
 def get_aligned_sequences(args):
-    return align_sequences(args["gene_name"])
+    aligned = align_sequences(args["gene_name"])
+    if aligned is None:
+        abort(404, message="No sequences to align for the requested gene.")
+
+    return aligned
 
 @blp.route("/data/sequences")
 @api_key_required

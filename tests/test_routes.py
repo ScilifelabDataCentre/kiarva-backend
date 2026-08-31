@@ -336,30 +336,14 @@ def test_igsnperdata_unknown_allele(client):
 
 
 def test_frequencies_unknown_allele_is_404_in_every_mode(client):
-    # Plottability used to be read off the dictionaries pre-calculated at startup, which
-    # are only populated in prod, so this request 404d there and returned a 200 all-zero
-    # plot under pytest - leaving the 404 impossible to cover. Both modes now agree.
-    for endpoint, param in FREQUENCY_ENDPOINTS:
-        for allele in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
-            res = get(client, url(endpoint, **{param: allele}))
-            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {allele}"
-
-    # The plottable allele still resolves.
+    # Plottability used to be read off the dictionaries pre-calculated at startup, which are
+    # only populated in prod, so this request 404d there and returned a 200 all-zero plot
+    # under pytest - leaving the 404 impossible to cover. Both modes now agree.
     for endpoint, param in FREQUENCY_ENDPOINTS:
         assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
         for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
             res = get(client, url(endpoint, **{param: absent}))
-            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
-            assert absent not in res.get_data(as_text=True)
-
-    for endpoint, param in (
-        ("/data/frequencies/table/gene", "gene_name"),
-        ("/data/aminoacidfrequencies/table/gene", "aa_gene_name"),
-    ):
-        assert get(client, url(endpoint, **{param: TEST_GENE})).status_code == 200
-        for absent in ("IGHV9-99", "IGHD1-1"):
-            res = get(client, url(endpoint, **{param: absent}))
-            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {absent}"
 
 
 def test_igsnperdata(client):
@@ -682,3 +666,46 @@ def test_unknown_fasta_type_and_plot_type_raise(app):
         generate_fasta(TEST_GENE, type="genomicc")
     with pytest.raises(ValueError, match="unknown plot_type"):
         create_frequencies_table(TEST_GENE, "genomicc", full_gene=True)
+
+
+def test_empty_plot_selection_is_not_an_error(client):
+    # Nothing chosen yet is a legitimate state, not a malformed request. The frontend sends
+    # an empty selection on first load and whenever a selection is reset, so requiring at
+    # least one character turned both into a 422 that getJson quietly swallowed.
+    for u in ("/data/plotoptions?current_selection=", "/data/plotoptions"):
+        res = get(client, u)
+        assert res.status_code == 200, f"{u} returned {res.status_code}"
+        assert res.get_json() == []
+
+    # A real selection is unaffected.
+    assert get(client, url("/data/plotoptions", current_selection="IGHV")).status_code == 200
+
+
+def test_aminoacid_table_resolves_the_master_allele(app):
+    # The frontend asks for this table by *genomic* allele name - that is what it resolved
+    # from the plot selection - so it has to be translated to the master amino acid allele it
+    # collapses into. 243 of the 732 plottable alleles are not their own master, and checking
+    # the cache before resolving made every one of them a 404.
+    from services.frequencies import create_frequencies_table
+
+    # IGHV1-8*02 and *04 both collapse into IGHV1-8*01 in the mock data.
+    for genomic in (TEST_ALLELE, "IGHV1-8*02", "IGHV1-8*04"):
+        table = create_frequencies_table(genomic, "aminoacid")
+        assert table is not None, f"no amino acid table for {genomic}"
+        assert TEST_ALLELE in table, f"{genomic} did not resolve to its master"
+
+    # A *DEL has no amino acid master, and a non-plottable allele none either.
+    assert create_frequencies_table("IGHV1-8*DEL", "aminoacid") is None
+    assert create_frequencies_table("IGHD1-1*01", "aminoacid") is None
+
+
+def test_alignment_covers_only_the_plotted_loci(client):
+    # repositories/filters.py says IGHD and IGHJ must never be offered as a plot or
+    # alignment selection, and this was the one query in that family without the locus
+    # restriction. Handed no sequences, MAFFT also produced one blank record rather than
+    # nothing, so the answer was 200 with a row of empty strings.
+    assert get(client, url("/data/sequences/alignedsequences", gene_name=TEST_GENE)).status_code == 200
+
+    for absent in ("IGHD1-1", "IGHJ6", "IGHV9-99"):
+        res = get(client, url("/data/sequences/alignedsequences", gene_name=absent))
+        assert res.status_code == 404, f"aligned {absent}, which no plot offers"

@@ -95,15 +95,32 @@ def test_rejects_unknown_superpopulation(app):
 
 def test_rejects_ambiguous_gene_and_allele(app):
     # Two non-flanking allele names under one gene/allele pair makes the db_name that
-    # get_db_name_from_options resolves a selection to arbitrary.
-    add_row(db_name="IGHD1-1*01", gene="IGHD1-1", allele="01", case="case_IBS_EUR")
-    add_row(db_name="IGHD1-1*01_duplicate", gene="IGHD1-1", allele="01", case="case_IBS_EUR")
+    # get_db_name_from_options resolves a selection to arbitrary. A plotted locus, because
+    # the check covers exactly the rows the resolver can reach - see the test below.
+    add_row(db_name="IGHV9-99*01", gene="IGHV9-99", allele="01", case="case_IBS_EUR",
+            db_name_AA="IGHV9-99*01")
+    add_row(db_name="IGHV9-99*01_duplicate", gene="IGHV9-99", allele="01",
+            case="case_TSI_EUR", db_name_AA="IGHV9-99*01")
 
     with pytest.raises(SourceDataError) as raised:
         validate_loaded_data()
 
-    assert "IGHD1-1,01" in str(raised.value)
+    assert "IGHV9-99,01" in str(raised.value)
     assert "more than one allele name" in str(raised.value)
+
+
+def test_ambiguity_outside_the_plotted_loci_is_not_a_boot_failure(app):
+    # get_db_name_from_options filters with the full plot_selection_criteria, locus
+    # restriction included, so it can never resolve to an IGHD or IGHJ row. Checking those
+    # made the boot check stricter than the function it protects: an ambiguous pair the app
+    # never reaches and no plot ever shows would have stopped the service starting.
+    # A gene not already in the mock data, so the only thing under test is the ambiguity -
+    # reusing IGHD1-1*01 would add a row with no IgSNPer values beside one that has them and
+    # trip that check instead.
+    add_row(db_name="IGHD9-99*01", gene="IGHD9-99", allele="01", case="case_IBS_EUR")
+    add_row(db_name="IGHD9-99*01_duplicate", gene="IGHD9-99", allele="01", case="case_TSI_EUR")
+
+    validate_loaded_data()
 
 
 def test_reports_every_problem_at_once(app):
@@ -189,3 +206,30 @@ def test_rejects_divergent_igsnper_values_for_one_allele(app):
     message = str(raised.value)
     assert TRANSLATED_ALLELE in message
     assert "more than one set of IgSNPer values" in message
+
+
+def test_an_unknown_locus_does_not_hide_other_problems(app):
+    # The de-duplication is scoped to the unknown locus's own rows. Suppressing the amino
+    # acid checks outright whenever any unknown locus existed hid a genuine missing
+    # db_name_AA on a known allele until the unrelated row was dealt with - the extra round
+    # trip that reporting everything at once exists to avoid.
+    add_row(db_name="TRGJ1*01", gene="TRGJ1", allele="01", db_name_AA=None)
+    set_amino_acid_name(TRANSLATED_ALLELE, None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "no known locus: TRGJ1" in message
+    assert TRANSLATED_ALLELE in message, "the real amino acid problem was suppressed"
+    assert "should be translated" in message
+
+
+def test_a_deletion_is_recognised_by_either_spelling(app):
+    # The homozygous deletions were identified two ways: allele == 'DEL' here and
+    # db_name NOT LIKE '%*DEL' in the FASTA and MSA queries. A row spelled the other way was
+    # reported as "should be translated" and stopped the service booting, while the FASTA
+    # queries excluded it correctly.
+    add_row(db_name="IGHV9-99*DEL", gene="IGHV9-99", allele="deletion", db_name_AA=None)
+
+    validate_loaded_data()

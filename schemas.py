@@ -14,6 +14,8 @@ from marshmallow import EXCLUDE, Schema, fields, validate
 # 28 characters. Rejecting anything else keeps regex metacharacters and SQL LIKE
 # wildcards out of the queries these names are used in.
 NAME_PATTERN = r"\A[A-Za-z0-9*/,_-]{1,64}\Z"
+# The same character set, but allowing empty - see PlotOptionArgs below.
+EMPTY_OR_NAME_PATTERN = r"\A[A-Za-z0-9*/,_-]{0,64}\Z"
 
 # Sequences are nucleotide (ACGT) or amino acid single-letter codes, '*' for a stop codon,
 # with the longest stored sequence at 330 characters. Digits are allowed because a search
@@ -55,8 +57,15 @@ class FastaFileNameArgs(ArgsSchema):
     file_name = name_field("Gene or gene segment to build the FASTA file from")
 
 class PlotOptionArgs(ArgsSchema):
-    current_selection = name_field(
-        "Selection made so far. A trailing '*' asks for allele names, otherwise gene names"
+    # Empty is a legitimate value here, unlike the other name parameters: it means nothing has
+    # been chosen yet. The frontend sends it on first load and whenever a selection is reset,
+    # and get_plot_options answers with an empty list. Requiring at least one character turned
+    # both into a 422.
+    current_selection = fields.Str(
+        load_default = "",
+        validate = validate.Regexp(EMPTY_OR_NAME_PATTERN),
+        metadata = {"description": "Selection made so far. A trailing '*' asks for allele "
+                                   "names, otherwise gene names. Empty means nothing chosen yet"},
     )
 
 class SelectionArgs(ArgsSchema):

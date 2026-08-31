@@ -1,6 +1,7 @@
 # Script for generating fasta files from db data
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from repositories.filters import is_deletion
 from utils import dict_to_fasta_str
 
 # Three different types of fasta files can be generated:
@@ -24,7 +25,7 @@ def generate_fasta(gene_segment, type = "genomic"):
         distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name,
                 ImmuneDiscoverDataModel.sequence,
-                ).distinct().filter(ImmuneDiscoverDataModel.db_name.startswith(gene_segment, autoescape=True)).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).all()
+                ).distinct().filter(ImmuneDiscoverDataModel.db_name.startswith(gene_segment, autoescape=True)).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(~is_deletion()).all()
     elif type == "genomic_fl":
         distinct_sequences = ImmuneDiscoverDataModel.query.with_entities(
                 ImmuneDiscoverDataModel.db_name,
