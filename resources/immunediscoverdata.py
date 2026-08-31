@@ -69,13 +69,15 @@ def health():
 # is sent to the server, the requester then gets the response
 # {db_name: IGHV3-30*02/IGHV3-30-5*02}.
 def get_db_name(args):
-    selection = args["selection"].split(",")
-    # Unpacking a selection that is not exactly gene,allele used to raise and surface as
-    # a 500. The schema cannot express this, since a gene name may itself contain a comma.
-    if len(selection) != 2:
+    # Split on the *last* comma, not every comma: a gene value can itself contain one
+    # ("IGHV3-30,IGHV3-30-5") and the resolver handles that, so requiring exactly two parts
+    # rejected a selection it answers correctly. No allele or db_name in the data contains a
+    # comma, so the last one always separates gene from allele. Unpacking whatever split()
+    # returned used to raise and surface as a 500; the schema cannot express this.
+    gene, _, allele = args["selection"].rpartition(",")
+    if not gene:
         abort(422, message="'selection' must be a gene and an allele, comma separated.")
 
-    gene, allele = selection
     return {"db_name": get_db_name_from_options(gene, allele)}
 
 # The four frequency endpoints below all have the same shape: take the allele name from

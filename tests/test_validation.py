@@ -232,3 +232,26 @@ def test_an_unknown_locus_does_not_hide_other_problems(app):
     assert "no known locus: TRGJ1" in message
     assert TRANSLATED_ALLELE in message, "the real amino acid problem was suppressed"
     assert "should be translated" in message
+
+
+def test_ambiguity_through_a_composite_gene_is_caught(app):
+    # A gene value can name two genes at once, and /data/plotoptions offers them as separate
+    # options, so the resolver matches a selection against each comma-separated component.
+    # Grouping by the literal column split those rows into groups that each looked
+    # unambiguous: a composite row colliding with an existing plain one passed validation
+    # while making get_db_name_from_options answer arbitrarily.
+    #
+    # The other direction - that grouping over components does not invent ambiguity - is
+    # covered by test_mock_data_passes_validation: the mock data has a composite gene of
+    # its own, whose two components each still resolve to one allele name.
+    add_row(db_name="IGHV9-99*01", gene="IGHV9-99", allele="01", case="case_IBS_EUR",
+            db_name_AA="IGHV9-99*01")
+    add_row(db_name="IGHV9-98*01", gene="IGHV9-98,IGHV9-99", allele="01",
+            case="case_TSI_EUR", db_name_AA="IGHV9-98*01")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "IGHV9-99,01" in message
+    assert "more than one allele name" in message
