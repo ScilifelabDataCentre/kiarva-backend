@@ -107,6 +107,14 @@ def allele_resolution_problems():
     that names that gene, and grouping literally split them into separate groups that each
     looked unambiguous - a new composite row colliding with an existing plain one would have
     passed while making the resolver's answer arbitrary.
+
+    Splitting on commas covers what the resolver matches for whole components, but not quite
+    everything it matches: plot_options_regex makes the leading comma optional, so a
+    selection that is only the tail of a component - "30-5" against "IGHV3-30-5" - resolves
+    too, and no group here holds it. That is left alone deliberately. Every gene name in the
+    data is prefixed with its locus, so none is a suffix of another (93 components, 0 such
+    pairs), and /data/plotoptions only ever offers whole components - so a selection of that
+    shape cannot come from the frontend and cannot collide with a real gene.
     """
     rows = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.gene,
