@@ -613,6 +613,29 @@ def test_aminoacid_table_for_a_name_with_no_master_is_a_404(client):
                            allele_name=TEST_ALLELE)).status_code == 200
 
 
+def test_a_master_amino_acid_allele_of_null_has_no_table(app):
+    # get_aminoacid_top_allele returns {'allele': ..., 'allele_aa': None} for a row that
+    # carries db_name_AA_list without db_name_AA, and that dict is truthy - so guarding on it
+    # rather than on the master let allele_name become None and produced a table of zeroes
+    # naming an allele called "None". validate_loaded_data() rejects that row shape at
+    # startup, which is why reaching it means writing the row in behind the loader.
+    from db import db
+    from models.immunediscoverdata import ImmuneDiscoverDataModel
+    from services.frequencies import create_frequencies_table
+
+    row = ImmuneDiscoverDataModel.query.filter_by(db_name=TEST_ALLELE).first()
+    orphan = ImmuneDiscoverDataModel(**{
+        column.name: getattr(row, column.name)
+        for column in ImmuneDiscoverDataModel.__table__.columns if column.name != "id"
+    })
+    orphan.db_name, orphan.allele, orphan.case = "IGHV9-99*DEL", "DEL", "case_XTRA_EUR"
+    orphan.db_name_AA, orphan.db_name_AA_list = None, "IGHV9-99*01"
+    db.session.add(orphan)
+    db.session.flush()
+
+    assert create_frequencies_table("IGHV9-99*01", "aminoacid") is None
+
+
 def test_aminoacidfrequencies_table_gene(client):
     # Requesting a whole gene returns one block of rows per amino acid allele of that
     # gene, each carrying the list of alleles collapsed into it.
