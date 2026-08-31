@@ -158,30 +158,38 @@ def population_problems():
 def allele_resolution_problems():
     """(gene, allele) must identify exactly one db_name once flanking rows are excluded.
 
-    get_db_name_from_options resolves a plot selection by taking the first row it gets
-    back, which is only correct because this holds. It does not hold with flanking variants
+    get_db_name_from_options resolves a plot selection by taking the first row it gets back,
+    which is only correct because this holds. It does not hold with flanking variants
     included - they share their parent's allele value - which is why they are excluded from
     the plot and MSA paths.
-    """
-    distinct_db_names = func.count(func.distinct(ImmuneDiscoverDataModel.db_name))
 
-    # The same criteria get_db_name_from_options resolves through, locus restriction
-    # included. Excluding only the flanking rows made this stricter than the function it
-    # protects: an ambiguous pair in IGHD or IGHJ, which the resolver can never reach and no
-    # plot ever shows, would have stopped the service booting.
-    ambiguous = db.session.query(
+    Grouped over the comma-separated components of the gene column rather than its literal
+    value, because that is how the resolver matches: plot_options_regex treats a composite
+    value like "IGHV3-30,IGHV3-30-5" as naming both genes, and /data/plotoptions offers them
+    as two separate options. So the rows a selection can reach span every literal value that
+    names that gene, and grouping literally split them into separate groups that each looked
+    unambiguous - a new composite row colliding with an existing plain one would have passed
+    while making the resolver's answer arbitrary.
+    """
+    rows = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.gene,
         ImmuneDiscoverDataModel.allele,
-        ).filter(*plot_selection_criteria()
-        ).group_by(ImmuneDiscoverDataModel.gene, ImmuneDiscoverDataModel.allele
-        ).having(distinct_db_names > 1).all()
+        ImmuneDiscoverDataModel.db_name,
+        ).filter(*plot_selection_criteria()).distinct().all()
+
+    by_selection = {}
+    for gene, allele, db_name in rows:
+        for component in gene.split(","):
+            by_selection.setdefault((component, allele), set()).add(db_name)
+
+    ambiguous = sorted(pair for pair, names in by_selection.items() if len(names) > 1)
 
     if not ambiguous:
         return []
 
-    pairs = [(gene + "," + allele,) for gene, allele in ambiguous]
-    return [str(len(pairs)) + " gene/allele selection(s) resolve to more than one allele "
-            "name, so which one a plot shows is arbitrary: " + sample_names(pairs)]
+    return [str(len(ambiguous)) + " gene/allele selection(s) resolve to more than one allele "
+            "name, so which one a plot shows is arbitrary: "
+            + sample_names([(g + "," + a,) for g, a in ambiguous])]
 
 def validate_loaded_data():
     """Check the loaded data, raising SourceDataError if anything is wrong.
