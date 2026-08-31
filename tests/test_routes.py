@@ -410,6 +410,18 @@ def test_db_name(client):
     # A gene whose alleles are only reachable through the two-gene db_name.
     res = get(client, url("/data/db_name", selection=f"IGHV3-30-5,{TWO_GENE_ALLELE}"))
     assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+    res = get(client, url("/data/db_name", selection=f"IGHV3-30,{TWO_GENE_ALLELE}"))
+    assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+
+    # The same row named by the composite gene the loader actually stored. The selection is
+    # split on its last comma, because a gene value can contain one itself; splitting on
+    # every comma made this a 422. The frontend sends one component at a time, which is why
+    # that never showed up in production.
+    res = get(client, url("/data/db_name", selection=f"IGHV3-30,IGHV3-30-5,{TWO_GENE_ALLELE}"))
+    assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+
+    # A selection with no comma at all still cannot be split into a gene and an allele.
+    assert get(client, url("/data/db_name", selection=TEST_GENE)).status_code == 422
 
     # A gene the allele does not belong to.
     res = get(client, url("/data/db_name", selection=f"{TEST_GENE},03"))
