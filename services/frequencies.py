@@ -252,7 +252,12 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
                 # IgSNPer endpoint now turns into a 404, in the one path this function
                 # still had left.
                 top_allele = get_aminoacid_top_allele(allele_name)
-                if not top_allele:
+                # Tested through .get('allele_aa') rather than on the dict itself, which is
+                # truthy even when the master is null - the shape of a row carrying
+                # db_name_AA_list with no db_name_AA. validate_loaded_data() rejects that at
+                # startup, so this is the second line of defence; without it allele_name
+                # became None and the download was a table of zeroes naming an allele "None".
+                if not top_allele.get('allele_aa'):
                     return None
                 allele_name = top_allele['allele_aa']
                 aa_list = get_aminoacid_allele_list(allele_name)['aa_allele_list']
