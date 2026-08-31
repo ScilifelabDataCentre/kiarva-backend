@@ -15,6 +15,7 @@ from sqlalchemy import func, or_
 
 from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from repositories.filters import is_deletion, plot_selection_criteria
 from services.frequencies import subpopulation_order, superpopulation_order
 
 class SourceDataError(Exception):
@@ -25,7 +26,7 @@ class SourceDataError(Exception):
 def never_translated():
     return or_(
         ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True),
-        ImmuneDiscoverDataModel.allele == 'DEL',
+        is_deletion(),
         ImmuneDiscoverDataModel.gene.like('IGHD%'),
         ImmuneDiscoverDataModel.gene.like('IGHJ%'),
     )
@@ -85,7 +86,8 @@ def population_problems():
         unknown = sorted(in_data - set(order))
         if unknown:
             problems.append(
-                "Unknown " + label + "(s) " + ", ".join(unknown) + ", which are not in the "
+                "Unknown " + label + "(s) " + sample_names([(u,) for u in unknown])
+                + ", which are not in the "
                 "display order in services/frequencies.py and would be left out of every plot")
 
     return problems
@@ -103,7 +105,11 @@ def allele_resolution_problems():
     ambiguous = db.session.query(
         ImmuneDiscoverDataModel.gene,
         ImmuneDiscoverDataModel.allele,
-        ).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)
+        # The same criteria get_db_name_from_options resolves through, locus restriction
+        # included. Excluding only the flanking rows made this stricter than the function it
+        # protects: an ambiguous pair in IGHD or IGHJ, which the resolver can never reach and
+        # no plot ever shows, would have stopped the service booting.
+        ).filter(*plot_selection_criteria()
         ).group_by(ImmuneDiscoverDataModel.gene, ImmuneDiscoverDataModel.allele
         ).having(distinct_db_names > 1).all()
 
