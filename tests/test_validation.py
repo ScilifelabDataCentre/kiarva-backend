@@ -255,3 +255,49 @@ def test_ambiguity_through_a_composite_gene_is_caught(app):
     message = str(raised.value)
     assert "IGHV9-99,01" in message
     assert "more than one allele name" in message
+
+
+def test_rejects_an_amino_acid_name_without_its_allele_list(app):
+    # db_name_AA_list is a property of db_name_AA, and three callers take its presence for
+    # granted: get_aminoacid_allele_list() measures it, the full-gene amino acid download
+    # splits it, and get_aminoacid_top_allele() matches a regex against it. A translated row
+    # without it is a 500 in the first two, so it is caught here as the data problem it is.
+    add_row(db_name="IGHV9-99*01", gene="IGHV9-99", allele="01",
+            db_name_AA="IGHV9-99*01", db_name_AA_list=None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "IGHV9-99*01" in message
+    assert "no db_name_AA_list" in message
+
+
+def test_rejects_an_allele_list_on_a_row_that_is_never_translated(app):
+    # The other direction, restricted to the rows that should carry neither. A *DEL row with
+    # a list would be matched by get_aminoacid_top_allele(), which returns db_name_AA as the
+    # master - None here - so the request resolves to nothing rather than to an error.
+    add_row(db_name="IGHV9-99*DEL", gene="IGHV9-99", allele="DEL",
+            db_name_AA=None, db_name_AA_list="IGHV9-99*01")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "IGHV9-99*DEL" in message
+    assert "never translated but have a db_name_AA_list" in message
+
+
+def test_a_translated_row_missing_both_is_reported_once(app):
+    # A row that loses db_name_AA while keeping its list is already reported as "should be
+    # translated". Saying that and "has a list but no master" about the same row is the
+    # double diagnosis this module avoids elsewhere, so the second check covers only rows
+    # that should carry neither.
+    set_amino_acid_name(TRANSLATED_ALLELE, None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "breaks 1 assumption(s)" in message
+    assert "should be translated" in message
