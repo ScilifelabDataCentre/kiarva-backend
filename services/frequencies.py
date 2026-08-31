@@ -234,7 +234,13 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
         # not their own master, so resolving this after the guard below rather than before it
         # made every one of them a 404.
         top_allele = get_aminoacid_top_allele(allele_or_gene)
-        if not top_allele:
+        # .get('allele_aa') rather than the dict itself, which is truthy even when the master
+        # is null - the shape of a row carrying db_name_AA_list with no db_name_AA, which
+        # validate_loaded_data() rejects at startup. The cache guard below already answers
+        # None for that, since None is not a key of the pre-calculated dictionaries; said
+        # here as well so this branch states its own precondition instead of resting on a
+        # later test of something else.
+        if not top_allele.get('allele_aa'):
             return None
         alleles = [{'allele': top_allele['allele_aa'],
                     'aa_list': get_aminoacid_allele_list(top_allele['allele_aa'])['aa_allele_list']}]
