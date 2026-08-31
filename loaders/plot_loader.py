@@ -29,6 +29,11 @@ def load_plot_data_to_dict():
     ):
         print("  loading " + description + "...", flush = True)
         start_time = datetime.now()
+        # Cleared before filling, so a second call in one process replaces the contents
+        # rather than merging into them - update() alone left alleles from an earlier load
+        # sitting alongside the new ones. Cleared in place for the same reason it is filled
+        # in place: the other modules hold this exact object.
+        target.clear()
         target.update(calculate_all_frequencies(population_type, plot_type))
         print("  loaded " + str(len(target)) + " " + description + " in " + str(datetime.now() - start_time), flush = True)
 

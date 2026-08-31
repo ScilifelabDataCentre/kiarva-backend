@@ -72,8 +72,7 @@ def get_db_name(args):
     # Split on the *last* comma, not every comma: a gene value can itself contain one
     # ("IGHV3-30,IGHV3-30-5") and the resolver handles that, so requiring exactly two parts
     # rejected a selection it answers correctly. No allele or db_name in the data contains a
-    # comma, so the last one always separates gene from allele. Unpacking whatever split()
-    # returned used to raise and surface as a 500; the schema cannot express this.
+    # comma, so the last one always separates gene from allele.
     gene, _, allele = args["selection"].rpartition(",")
     if not gene:
         abort(422, message="'selection' must be a gene and an allele, comma separated.")
@@ -88,8 +87,16 @@ def get_db_name(args):
 # production - which is what makes the miss below reachable by a test at all. It used to be
 # prod-only, so the same request 404d there and returned an all-zero plot everywhere else.
 def frequency_data(allele_name, precalculated):
-    # A miss means the allele is not plottable: a flanking ('_F') variant, an IGHD/IGHJ
-    # allele, or a name that is not in the data at all.
+    # A miss means the name is not a key of this dictionary. For the genomic endpoints that
+    # means not plottable - a flanking ('_F') variant, an IGHD/IGHJ allele, or absent from
+    # the data. For the amino acid endpoints it also means a plottable *genomic* name that is
+    # not itself an amino acid master, which is 243 of the 732 plottable alleles: these
+    # endpoints take an amino acid allele name, and the frontend resolves one through
+    # /data/aminoacidalleles before asking (see AminoAcidPlot.tsx).
+    #
+    # The table downloads deliberately differ: they are handed whatever the plot selection
+    # resolved to and translate it themselves, so the same parameter name accepts a genomic
+    # allele there. Consistent with each caller, but not with each other.
     if allele_name not in precalculated:
         abort(404, message="No plot data for the requested allele.")
 

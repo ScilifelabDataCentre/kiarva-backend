@@ -721,3 +721,20 @@ def test_alignment_covers_only_the_plotted_loci(client):
     for absent in ("IGHD1-1", "IGHJ6", "IGHV9-99"):
         res = get(client, url("/data/sequences/alignedsequences", gene_name=absent))
         assert res.status_code == 404, f"aligned {absent}, which no plot offers"
+
+
+
+def test_the_preload_replaces_rather_than_merges(app):
+    # target.update() alone left alleles from an earlier load sitting alongside the new ones.
+    # The dictionaries are module-level and shared by name, so they are cleared in place
+    # rather than rebound - and the invariant belongs here, not in the test fixture.
+    from constants import allele_superpopulation_frequencies
+    from loaders import load_plot_data_to_dict
+
+    before = len(allele_superpopulation_frequencies)
+    allele_superpopulation_frequencies["STALE*99"] = [{"population": "AFR", "n": 0, "frequency": 0.0}]
+
+    load_plot_data_to_dict()
+
+    assert "STALE*99" not in allele_superpopulation_frequencies
+    assert len(allele_superpopulation_frequencies) == before
