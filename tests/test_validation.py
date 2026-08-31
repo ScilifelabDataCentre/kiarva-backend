@@ -208,6 +208,23 @@ def test_rejects_divergent_igsnper_values_for_one_allele(app):
     assert "more than one set of IgSNPer values" in message
 
 
+def test_rejects_two_different_igsnper_scores_for_one_allele(app):
+    # The other shape of divergence: not a value against a null, but two different values.
+    # The check counts distinct values per allele rather than coalescing nulls to a sentinel,
+    # so both shapes have to be covered - and this is the one the researchers would notice,
+    # since either score is plausible and which one is served depends on the query plan.
+    add_row(db_name=TRANSLATED_ALLELE, gene="IGHV1-8", allele="01", case="case_XTRA_EUR",
+            db_name_AA=TRANSLATED_ALLELE, db_name_AA_list=TRANSLATED_ALLELE,
+            IgSNPer_uncommon=9.0, IgSNPer_SNPs="rs99999999(C:1,1);")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert TRANSLATED_ALLELE in message
+    assert "more than one set of IgSNPer values" in message
+
+
 def test_an_unknown_locus_does_not_hide_other_problems(app):
     # The de-duplication is scoped to the unknown locus's own rows. Suppressing the amino
     # acid checks outright whenever any unknown locus existed hid a genuine missing
@@ -302,3 +319,19 @@ def test_a_translated_row_missing_both_is_reported_once(app):
     message = str(raised.value)
     assert "breaks 1 assumption(s)" in message
     assert "should be translated" in message
+
+
+def test_an_untranslated_row_with_an_amino_acid_name_is_reported_once(app):
+    # The mirror of the test above. A *DEL row carrying db_name_AA is already reported as
+    # "db_name_AA set but never translated"; adding "and no db_name_AA_list" names the same
+    # allele twice under two headings, which is what the missing-list check has to exclude.
+    add_row(db_name="IGHV9-99*DEL", gene="IGHV9-99", allele="DEL",
+            db_name_AA="IGHV9-99*01", db_name_AA_list=None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "breaks 1 assumption(s)" in message
+    assert "never translated" in message
+    assert "no db_name_AA_list" not in message

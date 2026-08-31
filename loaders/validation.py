@@ -11,7 +11,7 @@
 # on serving, so bad data cannot reach users and CrashLoopBackOff is the alarm. The data is
 # baked into the image, so it can only change when a new image ships.
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
 from db import db
 from models.immunediscoverdata import ImmuneDiscoverDataModel
@@ -94,11 +94,15 @@ def amino_acid_coverage_problems(unknown_loci = ()):
             " (a flanking variant, a *DEL, or a gene outside the plotted V loci): "
             + sample_names(unexpected))
 
+    # Restricted the same way masterless below is, and for the same reason: a row that is
+    # never translated yet carries db_name_AA is already reported by the check above, and
+    # adding "and no list" names the same allele twice under two headings.
     listless = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.db_name
         ).filter(ImmuneDiscoverDataModel.db_name_AA != None
         ).filter(ImmuneDiscoverDataModel.db_name_AA_list == None
-        ).filter(known_locus_rows).distinct().all()
+        ).filter(known_locus_rows
+        ).filter(~never_translated()).distinct().all()
     if listless:
         problems.append(
             str(len(listless)) + " allele(s) have db_name_AA but no db_name_AA_list, which"
@@ -156,13 +160,21 @@ def igsnper_consistency_problems():
     that won would be whichever the query plan returned first, and a real score could
     disappear silently. Zero alleles diverge today; this is what keeps that true.
     """
-    def distinct_values(column):
-        return func.count(func.distinct(func.coalesce(column, "~")))
+    # A group diverges if it holds more than one non-null value, or one non-null value on
+    # some rows and nothing on others. Counted rather than coalesced to a sentinel:
+    # IgSNPer_uncommon is a Float, and coalescing it to "~" only works because SQLite types
+    # values rather than columns. SQLALCHEMY_DATABASE_URI is a DATABASE_URL override, so
+    # against PostgreSQL that sentinel would make this startup check itself the crash
+    # ("invalid input syntax for type double precision"). COUNT(DISTINCT col) ignores nulls
+    # on both engines, which is what makes the two comparisons enough.
+    def diverges(column):
+        values = func.count(func.distinct(column))
+        return or_(values > 1, and_(values == 1, func.count(column) < func.count()))
 
     divergent = db.session.query(ImmuneDiscoverDataModel.db_name).group_by(
         ImmuneDiscoverDataModel.db_name
-        ).having(or_(distinct_values(ImmuneDiscoverDataModel.IgSNPer_uncommon) > 1,
-                     distinct_values(ImmuneDiscoverDataModel.IgSNPer_SNPs) > 1)).all()
+        ).having(or_(diverges(ImmuneDiscoverDataModel.IgSNPer_uncommon),
+                     diverges(ImmuneDiscoverDataModel.IgSNPer_SNPs))).all()
 
     if not divergent:
         return []

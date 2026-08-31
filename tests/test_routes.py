@@ -415,6 +415,11 @@ def test_plotoptions_genes(client):
     assert get(client, url("/data/plotoptions", current_selection="IGHD")).get_json() == []
     assert get(client, url("/data/plotoptions", current_selection="IGHJ")).get_json() == []
 
+    # A '*' with no gene in front of it selects nothing. plot_options_regex("") builds
+    # ',{0,1}(,|$)', which matches every gene, so this answered with every plottable allele
+    # in the data. '*' is legal in an allele name, so NAME_PATTERN cannot reject it.
+    assert get(client, url("/data/plotoptions", current_selection="*")).get_json() == []
+
 
 def test_plotoptions_alleles(client):
     # Allele lists per gene. The flanking IGHV1-8*01_F1 row is excluded outright, and
@@ -593,6 +598,19 @@ def test_frequencies_table_allele(client):
     assert rows[1] == f"{TEST_ALLELE}\tAFR\tAFR\t0.85714\t6"
     assert f"{TEST_ALLELE}\tTSI\tEUR\t0.5\t1" in rows
     assert not [row for row in rows if "\tALL\t" in row]
+
+
+def test_aminoacid_table_for_a_name_with_no_master_is_a_404(client):
+    # get_aminoacid_top_allele returns {} when the name appears in no db_name_AA_list, and
+    # subscripting that was a KeyError and a 500. Reachable with any schema-valid name that
+    # has no translation: an allele not in the data, a flanking variant, an IGHD allele.
+    for name in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+        res = get(client, url("/data/aminoacidfrequencies/table/allele", aa_allele_name=name))
+        assert res.status_code == 404, name
+
+    # The genomic table of the same allele is unaffected - it needs no translation.
+    assert get(client, url("/data/frequencies/table/allele",
+                           allele_name=TEST_ALLELE)).status_code == 200
 
 
 def test_aminoacidfrequencies_table_gene(client):
