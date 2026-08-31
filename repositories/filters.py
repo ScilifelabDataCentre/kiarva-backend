@@ -77,17 +77,6 @@ def in_plot_loci():
     """True for rows belonging to a locus that is plotted, and therefore translated."""
     return or_(*(ImmuneDiscoverDataModel.gene.like(locus + '%') for locus in PLOT_LOCI))
 
-def is_deletion():
-    """True for the homozygous deletion rows.
-
-    One definition, because there were two: loaders/validation.py matched allele == 'DEL'
-    while the FASTA and MSA queries matched db_name NOT LIKE '%*DEL'. A *DEL row whose allele
-    column was spelled differently would have been reported as "should be translated" and
-    stopped the service booting, while the FASTA queries excluded it correctly.
-    """
-    return or_(ImmuneDiscoverDataModel.allele == 'DEL',
-               ImmuneDiscoverDataModel.db_name.like('%*DEL'))
-
 def plot_selection_criteria():
     """Criteria restricting a query to the rows eligible for plots and MSA.
 
