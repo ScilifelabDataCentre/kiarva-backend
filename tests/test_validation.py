@@ -215,3 +215,20 @@ def test_rejects_divergent_igsnper_values_for_one_allele(app):
     message = str(raised.value)
     assert TRANSLATED_ALLELE in message
     assert "more than one set of IgSNPer values" in message
+
+
+def test_an_unknown_locus_does_not_hide_other_problems(app):
+    # The de-duplication is scoped to the unknown locus's own rows. Suppressing the amino
+    # acid checks outright whenever any unknown locus existed hid a genuine missing
+    # db_name_AA on a known allele until the unrelated row was dealt with - the extra round
+    # trip that reporting everything at once exists to avoid.
+    add_row(db_name="TRGJ1*01", gene="TRGJ1", allele="01", db_name_AA=None)
+    set_amino_acid_name(TRANSLATED_ALLELE, None)
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "no known locus: TRGJ1" in message
+    assert TRANSLATED_ALLELE in message, "the real amino acid problem was suppressed"
+    assert "should be translated" in message

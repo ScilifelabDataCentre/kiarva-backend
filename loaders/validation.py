@@ -43,7 +43,7 @@ def sample_names(rows, limit = 10):
         return ", ".join(names)
     return ", ".join(names[:limit]) + ", ... (" + str(len(names) - limit) + " more)"
 
-def amino_acid_coverage_problems():
+def amino_acid_coverage_problems(unknown_loci = ()):
     """db_name_AA must be null on exactly the rows that are never translated.
 
     Both directions matter. A translated allele missing db_name_AA drops out of the amino
@@ -51,12 +51,21 @@ def amino_acid_coverage_problems():
     that has db_name_AA set would appear in them, and would also break the translated
     FASTA branch in services/fasta_generation.py, which has no exclusion of its own and
     relies on db_name_AA being null to leave those rows out.
+
+    Rows of an unrecognised locus are excluded, because locus_problems() already reports them
+    and this check would say something true but unhelpful about the same rows. Only those
+    rows: suppressing the whole check whenever any unknown locus exists would hide a genuine
+    missing db_name_AA on a known allele until the unrelated locus was dealt with, which is
+    the extra round trip reporting everything at once exists to avoid.
     """
     problems = []
+    known_locus_rows = (ImmuneDiscoverDataModel.gene.notin_(unknown_loci)
+                        if unknown_loci else True)
 
     missing = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.db_name
         ).filter(ImmuneDiscoverDataModel.db_name_AA == None
+        ).filter(known_locus_rows
         ).filter(~never_translated()).distinct().all()
     if missing:
         problems.append(
@@ -66,6 +75,7 @@ def amino_acid_coverage_problems():
     unexpected = ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.db_name
         ).filter(ImmuneDiscoverDataModel.db_name_AA != None
+        ).filter(known_locus_rows
         ).filter(never_translated()).distinct().all()
     if unexpected:
         problems.append(
@@ -75,7 +85,13 @@ def amino_acid_coverage_problems():
 
     return problems
 
-def locus_problems():
+def unrecognised_loci():
+    """Gene names in the data whose locus is not one the app knows how to present."""
+    genes = {row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
+        ImmuneDiscoverDataModel.gene).distinct().all()}
+    return sorted(gene for gene in genes if locus_of(gene) is None)
+
+def locus_problems(unknown):
     """Every locus in the data must be one the app knows how to present.
 
     Deriving "never translated" from PLOT_LOCI means an unrecognised locus is treated as
@@ -84,10 +100,6 @@ def locus_problems():
     announced, so it is reported here - with the right diagnosis, rather than as a
     translation problem.
     """
-    genes = {row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
-        ImmuneDiscoverDataModel.gene).distinct().all()}
-    unknown = sorted(gene for gene in genes if locus_of(gene) is None)
-
     if not unknown:
         return []
 
@@ -179,15 +191,13 @@ def validate_loaded_data():
     unrecognised locus makes its rows look untranslated too, so reporting the locus and
     stopping there says one true thing rather than two overlapping ones about the same row.
     """
-    unknown_locus = locus_problems()
-    if unknown_locus:
-        problems = (unknown_locus + igsnper_consistency_problems()
-                    + population_problems() + allele_resolution_problems())
-    else:
-        problems = (amino_acid_coverage_problems()
-                    + igsnper_consistency_problems()
-                    + population_problems()
-                    + allele_resolution_problems())
+    unknown_loci = unrecognised_loci()
+
+    problems = (locus_problems(unknown_loci)
+                + amino_acid_coverage_problems(unknown_loci)
+                + igsnper_consistency_problems()
+                + population_problems()
+                + allele_resolution_problems())
 
     if problems:
         raise SourceDataError(
