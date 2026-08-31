@@ -149,45 +149,57 @@ def file_attachment(body, download_name, content_type):
     return send_file(buffer, as_attachment=True, download_name=download_name,
                      mimetype=content_type)
 
+# The four frequency table downloads. create_frequencies_table returns None when the amino
+# acid name it was asked for resolves to no master amino acid allele, which is a name the
+# frontend never sends - the download option only appears once an allele has been selected to
+# plot - so it is answered as a 404 rather than a file.
+def frequency_table_attachment(name, plot_type, download_suffix, full_gene = False):
+    table = create_frequencies_table(name, plot_type, full_gene=full_gene)
+    if table is None:
+        abort(404, message="No frequency table for the requested "
+                           + ("gene" if full_gene else "allele") + ".")
+
+    return file_attachment(table, name + download_suffix, TSV_CONTENT_TYPE)
+
 @blp.route("/data/frequencies/table/allele")
 @api_key_required
 @blp.arguments(AlleleNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_allele_frequencies_table(args):
-    allele_name = args["allele_name"]
-    return file_attachment(create_frequencies_table(allele_name, "genomic"),
-                           allele_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["allele_name"], "genomic",
+                                      '_frequencies_genomic.tsv')
 
 @blp.route("/data/aminoacidfrequencies/table/allele")
 @api_key_required
 @blp.arguments(AminoAcidAlleleNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_aminoacid_allele_frequencies_table(args):
-    aa_allele_name = args["aa_allele_name"]
-    return file_attachment(create_frequencies_table(aa_allele_name, "aminoacid"),
-                           aa_allele_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["aa_allele_name"], "aminoacid",
+                                      '_frequencies_aminoacid.tsv')
 
 @blp.route("/data/frequencies/table/gene")
 @api_key_required
 @blp.arguments(GeneNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_gene_frequencies_table(args):
-    gene_name = args["gene_name"]
-    return file_attachment(create_frequencies_table(gene_name, "genomic", full_gene=True),
-                           gene_name + '_frequencies_genomic.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["gene_name"], "genomic",
+                                      '_frequencies_genomic.tsv', full_gene=True)
 
 @blp.route("/data/aminoacidfrequencies/table/gene")
 @api_key_required
 @blp.arguments(AminoAcidGeneNameArgs, location="query")
 @blp.response(200, description="Frequency table as a tab separated file")
 @blp.doc(responses={200: {"content": {TSV_CONTENT_TYPE: FILE_BODY}}})
+@blp.alt_response(404, description="No frequency table for the requested allele or gene")
 def get_aminoacid_gene_frequencies_table(args):
-    aa_gene_name = args["aa_gene_name"]
-    return file_attachment(create_frequencies_table(aa_gene_name, "aminoacid", full_gene=True),
-                           aa_gene_name + '_frequencies_aminoacid.tsv', TSV_CONTENT_TYPE)
+    return frequency_table_attachment(args["aa_gene_name"], "aminoacid",
+                                      '_frequencies_aminoacid.tsv', full_gene=True)
 
 @blp.route("/data/igsnperdata")
 @api_key_required

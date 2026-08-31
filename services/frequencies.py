@@ -177,6 +177,11 @@ def calculate_all_frequencies(population_type, plot_type):
 # create a .tsv formated table with frequency data for the requested allele/gene and type (genomic or amino acid),
 # which can then be downloaded by a user.
 def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
+    """Build the downloadable tsv, or return None when there is nothing to report.
+
+    None means the caller asked for an amino acid table by a name that resolves to no
+    master amino acid allele, which the resource turns into a 404.
+    """
     # Validates plot_type up front. The branches below choose on it with if/elif and if/else,
     # so an unrecognised value silently produced a header-only tsv for a full gene and was
     # treated as amino acid everywhere else.
@@ -240,7 +245,16 @@ def create_frequencies_table(allele_or_gene, plot_type, full_gene = False):
             else:
                 # if single allele, we did not fetch db_name_AA and db_name_AA_list in the query above,
                 # fetch them using our repository functions
-                allele_name = get_aminoacid_top_allele(allele_name)['allele_aa']
+                # get_aminoacid_top_allele returns {} when the name is in no row's
+                # db_name_AA_list, so subscripting it was a KeyError and a 500 for any
+                # schema-valid name that is not a genomic allele with a translation - a
+                # flanking variant, an IGHD allele, a typo. The sibling of the {} the
+                # IgSNPer endpoint now turns into a 404, in the one path this function
+                # still had left.
+                top_allele = get_aminoacid_top_allele(allele_name)
+                if not top_allele:
+                    return None
+                allele_name = top_allele['allele_aa']
                 aa_list = get_aminoacid_allele_list(allele_name)['aa_allele_list']
 
         plot_data_subpops = {}
