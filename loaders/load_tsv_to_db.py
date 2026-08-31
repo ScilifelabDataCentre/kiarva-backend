@@ -84,8 +84,8 @@ def validate_row(row_num, data):
 
 # tsv_files are compressed in repo, unpack them before loading.
 #
-# Every archive found is extracted on a best-effort basis, and an archive that will not open
-# is skipped rather than raised on. That is deliberate, not an oversight:
+# Every archive found is extracted on a best-effort basis, and an archive whose password is
+# missing or wrong is skipped rather than raised on. That is deliberate, not an oversight:
 #
 # Prepub data - results the research group has not published yet - is password protected and
 # unlocked in k8s with a sealed secret. It is served by a second deployment sitting behind
@@ -96,6 +96,12 @@ def validate_row(row_num, data):
 # access to the password, and gets exactly the public deployment's dataset.
 #
 # If no archive at all extracts, load_tsv_to_db() below raises on finding no .tsv files.
+#
+# Only the password case is skipped, and pyzipper raises RuntimeError for both a missing and a
+# wrong one. An archive that is itself broken - truncated, or not a zip - raises BadZipFile out
+# of the constructor and takes the startup down with it. That is intended: it means a defect in
+# the built image rather than a deployment without the secret, and booting with part of the
+# dataset silently missing is the outcome this module exists to prevent.
 def unpack_compressed_tsv_files(data_dir):
     paths_to_compressed_files = [data_dir + 'compressed/' + file for file in os.listdir(data_dir + 'compressed/') if file.endswith('.zip')]
     zip_pass = os.getenv("ZIP_PASSWORD") or None
@@ -243,9 +249,9 @@ def load_tsv_to_db():
             except IntegrityError as e:
                 db.session.rollback()
                 raise SourceDataError(
-                    file + " duplicates rows already in the database and was not loaded. "
-                    "Every row must be a unique combination of case, db_name, gene and "
-                    "flank_index." ) from e
+                    file + " duplicates rows already loaded, or duplicates rows within "
+                    "itself, and was not loaded. Every row must be a unique combination of "
+                    "case, db_name, gene and flank_index." ) from e
             except Exception:
                 db.session.rollback()
                 raise

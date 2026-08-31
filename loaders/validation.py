@@ -57,6 +57,17 @@ def amino_acid_coverage_problems(unknown_loci = ()):
     those rows: suppressing the whole check whenever any unknown locus exists would hide a
     genuine missing db_name_AA on a known allele until the unrelated locus was dealt with,
     which is the extra round trip reporting everything at once exists to avoid.
+
+    db_name_AA_list is checked alongside it, in both directions too. The list is a
+    property of db_name_AA - the master name plus every genomic allele collapsing into it
+    - so the two are set together or not at all, which is exactly how the data reads
+    today. Three callers take that for granted: get_aminoacid_allele_list() measures the
+    list, the full-gene amino acid download in services/frequencies.py splits it, and
+    get_aminoacid_top_allele() matches a regex against it to find the master. A list
+    missing from a translated row is a 500 in the first two; a list on a row with no
+    master resolves that master to None and 404s instead. Asserted here rather than
+    guarded at each caller, so one broken row is reported once as a data problem, with its
+    allele name, instead of as three different symptoms.
     """
     problems = []
     known_locus_rows = (ImmuneDiscoverDataModel.gene.notin_(unknown_loci)
@@ -82,6 +93,34 @@ def amino_acid_coverage_problems(unknown_loci = ()):
             str(len(unexpected)) + " allele(s) have db_name_AA set but are never translated"
             " (a flanking variant, a *DEL, or a gene outside the plotted V loci): "
             + sample_names(unexpected))
+
+    listless = ImmuneDiscoverDataModel.query.with_entities(
+        ImmuneDiscoverDataModel.db_name
+        ).filter(ImmuneDiscoverDataModel.db_name_AA != None
+        ).filter(ImmuneDiscoverDataModel.db_name_AA_list == None
+        ).filter(known_locus_rows).distinct().all()
+    if listless:
+        problems.append(
+            str(len(listless)) + " allele(s) have db_name_AA but no db_name_AA_list, which"
+            " three callers read as the list of alleles collapsing into it: "
+            + sample_names(listless))
+
+    # Restricted to the rows that should carry neither. A translated row missing db_name_AA
+    # while keeping its list is the same row the first check above already reports, and
+    # reporting it twice under two headings is the overlap this module avoids elsewhere -
+    # so what is left to say here is about a flanking, *DEL or non-V row, where the null
+    # db_name_AA is correct and the stray list is the whole problem.
+    masterless = ImmuneDiscoverDataModel.query.with_entities(
+        ImmuneDiscoverDataModel.db_name
+        ).filter(ImmuneDiscoverDataModel.db_name_AA_list != None
+        ).filter(ImmuneDiscoverDataModel.db_name_AA == None
+        ).filter(known_locus_rows
+        ).filter(never_translated()).distinct().all()
+    if masterless:
+        problems.append(
+            str(len(masterless)) + " allele(s) are never translated but have a"
+            " db_name_AA_list, which get_aminoacid_top_allele() matches on and would resolve"
+            " to a master of None: " + sample_names(masterless))
 
     return problems
 

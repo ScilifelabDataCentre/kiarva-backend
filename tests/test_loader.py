@@ -103,6 +103,23 @@ def test_a_file_failing_after_a_full_batch_leaves_nothing_behind(loader_app):
     assert loaded == {"first.tsv"}
 
 
+def test_a_file_duplicating_its_own_rows_says_so(loader_app):
+    # One commit per file means a duplicate inside a single file is not caught until that
+    # commit, so it arrives as the same IntegrityError as a duplicate of an already-loaded
+    # file. The message named only the second cause, which sent whoever read the pod log
+    # looking for a file that had been loaded before rather than at the file in front of them.
+    _, in_dir = loader_app
+    write_tsv(in_dir / "self.tsv", list(range(10)) + list(range(5)))
+
+    with pytest.raises(SourceDataError) as raised:
+        load_tsv_to_db()
+
+    message = str(raised.value)
+    assert "self.tsv" in message
+    assert "within itself" in message
+    assert rows_from("self.tsv") == 0
+
+
 def test_missing_tsv_files_raises(loader_app):
     # Was a bare quit(), which said nothing to whoever read the pod log.
     with pytest.raises(SourceDataError) as raised:
