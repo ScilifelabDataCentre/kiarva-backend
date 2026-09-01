@@ -732,13 +732,15 @@ def test_gene_tables_list_each_allele_once(client):
     }
 
 
-def test_openapi_spec_options_are_not_shared_between_apps():
+def test_openapi_spec_options_are_not_shared_between_apps(monkeypatch):
     # from_object copies the config class attribute by reference, and apispec's to_dict()
     # ends by deep-merging the spec it just built into it. Shared, the first app's schemas
     # accumulated there and won for every app built afterwards in the process.
     from app import create_app
     from config import TestConfig
 
+    # Neither app is the server and neither has a schema; only the generated spec is read.
+    monkeypatch.setenv("SKIP_DATA_LOAD", "1")
     first, second = create_app(TestConfig), create_app(TestConfig)
     assert first.config["API_SPEC_OPTIONS"] is not second.config["API_SPEC_OPTIONS"]
 
