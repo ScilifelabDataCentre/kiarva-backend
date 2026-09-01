@@ -50,7 +50,7 @@ def create_app(config_class=None):
 
     api.register_blueprint(ImmuneDiscoverDataBlueprint)
 
-    # Load tsv data to db as well as pre-load plots if in prod.
+    # Load the TSVs into the db, then pre-calculate the plot data. Both in every mode.
     #
     # Deliberately not wrapped in a try/except. A database error here means there is no
     # data to serve, and catching it used to log the error and return a fully routed app
