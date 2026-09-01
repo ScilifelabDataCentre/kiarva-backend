@@ -224,6 +224,33 @@ def igsnper_consistency_problems():
     return [str(len(divergent)) + " allele(s) carry more than one set of IgSNPer values, so "
             "which one is reported depends on the query plan: " + sample_names(divergent)]
 
+def amino_acid_list_problems():
+    """An amino acid master must carry exactly one db_name_AA_list.
+
+    The same shape as igsnper_consistency_problems() above, for the other column whose value
+    is a property of a name rather than of a row. db_name_AA_list is the master plus every
+    genomic allele collapsing into it, so every row sharing a db_name_AA has to repeat the
+    same list - and the full-gene amino acid download selects the two columns together and
+    relies on a plain DISTINCT returning one row per master. Two lists for one master make
+    DISTINCT return two, and the allele is written into the table twice: the mock data goes
+    from 30 rows for IGHV1-8*01 to 60 with one divergent row added.
+
+    No coalesce or null handling needed here, unlike the IgSNPer check: the pair check in
+    amino_acid_coverage_problems() already reports a master without a list, so anything
+    reaching this one has a list on every row.
+    """
+    divergent = db.session.query(ImmuneDiscoverDataModel.db_name_AA).filter(
+        ImmuneDiscoverDataModel.db_name_AA != None
+        ).group_by(ImmuneDiscoverDataModel.db_name_AA
+        ).having(func.count(
+            func.distinct(ImmuneDiscoverDataModel.db_name_AA_list)) > 1).all()
+
+    if not divergent:
+        return []
+
+    return [str(len(divergent)) + " amino acid allele(s) carry more than one db_name_AA_list, "
+            "so the full-gene download repeats them once per list: " + sample_names(divergent)]
+
 def population_problems():
     """Every population in the data must appear in the hardcoded display order.
 
@@ -306,6 +333,7 @@ def validate_loaded_data():
                 + mixed_locus_problems()
                 + amino_acid_coverage_problems(unknown_loci)
                 + igsnper_consistency_problems()
+                + amino_acid_list_problems()
                 + population_problems()
                 + allele_resolution_problems())
 

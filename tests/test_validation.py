@@ -382,3 +382,20 @@ def test_the_composite_genes_in_the_data_are_one_locus(app):
 
     assert composites, "mock data no longer has a composite gene to cover this"
     validate_loaded_data()
+
+
+def test_rejects_two_allele_lists_for_one_amino_acid_master(app):
+    # db_name_AA_list is a property of db_name_AA, so every row sharing a master has to repeat
+    # the same list. The full-gene amino acid download selects the two columns together and
+    # relies on a plain DISTINCT returning one row per master - two lists make it return two,
+    # and the allele is written into the table twice. Presence was checked in both directions;
+    # uniqueness was the member of the family left out.
+    add_row(db_name="IGHV1-8*09", gene="IGHV1-8", allele="09", case="case_XTRA_EUR",
+            db_name_AA=TRANSLATED_ALLELE, db_name_AA_list=TRANSLATED_ALLELE + ",IGHV1-8*09")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert TRANSLATED_ALLELE in message
+    assert "more than one db_name_AA_list" in message

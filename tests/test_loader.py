@@ -8,7 +8,9 @@
 
 import csv
 import os
+import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -109,13 +111,19 @@ def test_a_file_failing_after_a_full_batch_leaves_nothing_behind(loader_app):
     assert loaded == {"first.tsv"}
 
 
-def test_a_missing_data_directory_still_names_the_archives(loader_app):
+@pytest.mark.parametrize("missing", ["in", "compressed", "both"])
+def test_a_missing_data_directory_still_names_the_archives(loader_app, missing):
     # data/in/ is gitignored and dockerignored, so it exists only because extractall creates
-    # it. With no archive to extract there was nothing to create it, and listing it raised
+    # it, and data/compressed/ is listed before that happens. Either one absent raised a bare
     # FileNotFoundError before the message that says to check data/compressed/ - unreachable
-    # in exactly the case it describes.
-    _, in_dir = loader_app
-    in_dir.rmdir()
+    # in exactly the cases it describes. Parametrised because the first fix only covered in/,
+    # and the case it missed was the one with nothing to extract at all.
+    app, in_dir = loader_app
+    compressed = in_dir.parent / "compressed"
+    if missing in ("in", "both"):
+        in_dir.rmdir()
+    if missing in ("compressed", "both"):
+        compressed.rmdir()
 
     with pytest.raises(SourceDataError) as raised:
         load_tsv_to_db()
@@ -224,6 +232,32 @@ def test_create_app_does_not_return_an_app_when_there_is_no_data(tmp_path, monke
         create_app(FileConfig)
 
     assert "No .tsv files found" in str(raised.value)
+
+
+def test_the_migration_command_the_readme_documents_works(tmp_path):
+    """The command README.md gives for first-time setup has to be the one that works.
+
+    create_app() raises when the table is missing, and the flask CLI builds an app through it
+    to run a migration - so the migration has to state that it is not the server. The README
+    said so in prose while documenting the command without the flag, which made the documented
+    first-time setup fail on an error telling the contributor to run the command that had just
+    failed. Read out of the README rather than repeated here, so the two cannot drift again.
+    """
+    readme = pathlib.Path(ROOT_DIR, "README.md").read_text(encoding="utf-8")
+    after_heading = readme.split("##### Apply Database Migrations", 1)[1]
+    command = after_heading.split("```bash", 1)[1].split("```", 1)[0].strip()
+    assert "flask db upgrade" in command, f"unexpected command block: {command!r}"
+
+    env = {
+        **os.environ,
+        "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"],
+        "DATABASE_URL": "sqlite:///" + str(tmp_path / "fresh.db"),
+    }
+    result = subprocess.run(["bash", "-c", command], cwd=ROOT_DIR, env=env,
+                            capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr[-900:]
+    assert (tmp_path / "fresh.db").exists()
 
 
 def test_entrypoint_does_not_start_the_server_after_a_failed_migration(tmp_path):

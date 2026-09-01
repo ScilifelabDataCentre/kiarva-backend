@@ -239,14 +239,14 @@ You can change the key as you wish, but it must match the one in .env.
 
 Set up the local database using Flask-Migrate:
 ```bash
-flask db upgrade
+SKIP_DATA_LOAD=1 flask db upgrade
 ```
 
 This has to happen before the app will start: without the table, `create_app()` raises
-rather than serving an empty database. The migration itself does not load any data — it
-runs with `SKIP_DATA_LOAD=1`, which is also what `docker/entrypoint.sh` does on every
-container start, for the same reason: the flask CLI builds the app to run the migration,
-and at that point the tables it is about to create do not exist.
+rather than serving an empty database. `SKIP_DATA_LOAD=1` is what makes the migration
+itself exempt, and it is needed because the flask CLI builds the app through that same
+factory to run a migration — at which point the tables it is about to create do not
+exist yet. `docker/entrypoint.sh` sets it on the same command, for the same reason.
 
 ##### Install MAFFT (Required for Sequence Alignment)
 
