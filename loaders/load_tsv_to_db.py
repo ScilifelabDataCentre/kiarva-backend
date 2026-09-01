@@ -215,15 +215,20 @@ def load_one_tsv(data_in_dir, file):
 # if db is set up - load all tsv files which have not yet been loaded
 def load_tsv_to_db():
     data_dir = current_app.config.get("DATA_DIR")
-    unpack_compressed_tsv_files(data_dir)
-        
     data_in_dir = data_dir + 'in/'
-    # Created if it is not there, so the diagnosis below is the thing that fires. data/in/ is
-    # in .gitignore and .dockerignore, so it exists only because extractall makes it on the
-    # way to writing the first member - meaning with no archive at all to extract, listing it
-    # raised FileNotFoundError and the message naming data/compressed/ as the thing to check
-    # was unreachable in exactly the case it describes.
+
+    # Both created if absent, before anything lists either, so that the diagnosis below is
+    # what fires. data/in/ is in .gitignore and .dockerignore, so it exists only because
+    # extractall makes it on the way to writing the first member; data/compressed/ is listed
+    # by unpack_compressed_tsv_files. Either one missing raised a bare FileNotFoundError, and
+    # the message naming data/compressed/ as the thing to check was unreachable in exactly
+    # the cases it describes. Creating them does not hide anything: an empty data/compressed/
+    # is what "check that it holds the archives" is for.
+    os.makedirs(data_dir + 'compressed/', exist_ok = True)
     os.makedirs(data_in_dir, exist_ok = True)
+
+    unpack_compressed_tsv_files(data_dir)
+
     # get all tsv files from the current data/in dir
     tsv_files = [file for file in os.listdir(data_in_dir) if file.endswith('.tsv')]
     if not tsv_files:

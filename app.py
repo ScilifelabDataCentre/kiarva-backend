@@ -73,8 +73,11 @@ def create_app(config_class=None):
         if "immunediscoverdata" not in inspect(db.engine).get_table_names():
             raise SourceDataError(
                 "Table 'immunediscoverdata' does not exist, so there is no data to serve. "
-                "'flask db upgrade' has to run first - docker/entrypoint.sh does that on "
-                "every start, and locally it is a one-off after cloning.")
+                "Run 'SKIP_DATA_LOAD=1 flask db upgrade' first. The flag is part of the "
+                "command because the flask CLI builds this same app to run a migration, and "
+                "at that point the tables it is about to create do not exist yet - so "
+                "without it the migration fails on this very error. docker/entrypoint.sh "
+                "runs it exactly that way on every container start.")
 
         load_tsv_to_db()
         if not app.debug and not app.config.get("TESTING"):
