@@ -230,7 +230,7 @@ API_KEY="test123"
 This API key is required for all requests to the app. You will need to include it in the headers when testing or making requests:
 
 ```bash
-Authorization: Bearer test123
+X-api-key: test123
 ```
 
 You can change the key as you wish, but it must match the one in .env.
@@ -258,9 +258,9 @@ The app uses the external tool MAFFT for gene sequence alignment. To install it:
 
 Note: The mafft/ folder in this repo contains a .tar.gz archive used only in containerized deployments (e.g. Kubernetes).
 
-##### Run the App (Without Plot Data Preloading)
+##### Run the App
 
-To run the app in development mode with debugging (and skip preloading large plot data):
+To run the app in development mode with debugging:
 ```bash
 flask run --debug
 ```
@@ -275,7 +275,7 @@ pytest
 When calling endpoints in your tests or tools like Postman or curl, remember to include the required Authorization header:
 
 ```bash
-curl http://localhost:5000/some-endpoint \   -H "Authorization: Bearer test123"
+curl http://localhost:5000/some-endpoint -H "X-api-key: test123"
 ```
 
 ##### Docker
