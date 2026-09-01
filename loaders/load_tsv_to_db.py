@@ -95,7 +95,8 @@ def validate_row(row_num, data):
 # intended behaviour. The same holds locally: anyone can set the app up and run it without
 # access to the password, and gets exactly the public deployment's dataset.
 #
-# If no archive at all extracts, load_tsv_to_db() below raises on finding no .tsv files.
+# If no archive at all extracts - or none is even there - load_tsv_to_db() below raises on
+# finding no .tsv files.
 #
 # Only the password case is skipped, and pyzipper raises RuntimeError for both a missing and a
 # wrong one. An archive that is itself broken - truncated, or not a zip - raises BadZipFile out
@@ -217,6 +218,12 @@ def load_tsv_to_db():
     unpack_compressed_tsv_files(data_dir)
         
     data_in_dir = data_dir + 'in/'
+    # Created if it is not there, so the diagnosis below is the thing that fires. data/in/ is
+    # in .gitignore and .dockerignore, so it exists only because extractall makes it on the
+    # way to writing the first member - meaning with no archive at all to extract, listing it
+    # raised FileNotFoundError and the message naming data/compressed/ as the thing to check
+    # was unreachable in exactly the case it describes.
+    os.makedirs(data_in_dir, exist_ok = True)
     # get all tsv files from the current data/in dir
     tsv_files = [file for file in os.listdir(data_in_dir) if file.endswith('.tsv')]
     if not tsv_files:

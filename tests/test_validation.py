@@ -334,3 +334,50 @@ def test_an_untranslated_row_with_an_amino_acid_name_is_reported_once(app):
     assert "breaks 1 assumption(s)" in message
     assert "never translated" in message
     assert "no db_name_AA_list" not in message
+
+
+def test_an_unknown_locus_hiding_in_a_composite_gene_is_caught(app):
+    # The gene column can name two genes at once, and locus_of() prefix-matches whatever it
+    # is given - so testing the whole value answered with the first component's locus and
+    # never looked at the second. The row then matched in_plot_loci() on that same prefix, so
+    # its allele was offered under the wrong gene: IGHV1-8 gained an allele "99" resolving to
+    # db_name TRGJ1*01. Translated here so only the locus check can catch it.
+    add_row(db_name="TRGJ1*01", gene="IGHV1-8,TRGJ1", allele="99", case="case_XTRA_EUR",
+            db_name_AA="TRGJ1*01", db_name_AA_list="TRGJ1*01")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "no known locus: IGHV1-8,TRGJ1" in message
+    # Once, not twice: its components resolve to two different things, so the mixed-locus
+    # check below would also fire on it, and the unknown locus is the true diagnosis.
+    assert "breaks 1 assumption(s)" in message
+    assert "more than one locus" not in message
+
+
+def test_a_gene_naming_two_known_loci_is_caught(app):
+    # The other half: both components are known, so the check above is satisfied, but every
+    # prefix match on the column still answers on whichever comes first. This is what makes
+    # the whole-value matching in in_plot_loci() sound rather than lucky, so without it that
+    # function would have to match per component too.
+    add_row(db_name="IGHD9-99*01", gene="IGHV1-8,IGHD9-99", allele="99", case="case_XTRA_EUR",
+            db_name_AA="IGHD9-99*01", db_name_AA_list="IGHD9-99*01")
+
+    with pytest.raises(SourceDataError) as raised:
+        validate_loaded_data()
+
+    message = str(raised.value)
+    assert "IGHV1-8,IGHD9-99" in message
+    assert "more than one locus" in message
+
+
+def test_the_composite_genes_in_the_data_are_one_locus(app):
+    # The mock data carries "IGHV3-30,IGHV3-30-5", which both checks above must accept: the
+    # loader builds it from a rewrite dictionary whose every entry is IGHV.
+    composites = [gene for gene in {
+        row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
+            ImmuneDiscoverDataModel.gene).distinct().all()} if "," in gene]
+
+    assert composites, "mock data no longer has a composite gene to cover this"
+    validate_loaded_data()

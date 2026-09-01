@@ -38,6 +38,12 @@ KNOWN_LOCI = ("IGHV", "IGHD", "IGHJ", "TRGV")
 def locus_of(gene):
     """The locus a gene name belongs to, or None if it is not one we know.
 
+    Takes one gene name, not a gene column value: the column can hold a comma-separated
+    list, and prefix-matching the whole thing answers with the first component's locus and
+    says nothing about the rest. loaders/validation.py calls this per component and refuses
+    to boot on a value whose components do not all resolve to one locus, which is what makes
+    the whole-value matching in in_plot_loci() below correct rather than lucky.
+
     Matched against KNOWN_LOCI rather than sliced at a fixed width. Every locus here happens
     to be four characters, but slicing means a shorter gene name yields a truncated string
     that is in no list - so the service would refuse to boot citing a locus that does not
@@ -63,7 +69,14 @@ def allele_column(plot_type):
     raise ValueError("unknown plot_type: " + repr(plot_type))
 
 def in_plot_loci():
-    """True for rows belonging to a locus that is plotted, and therefore translated."""
+    """True for rows belonging to a locus that is plotted, and therefore translated.
+
+    Matched against the whole gene column value rather than per comma-separated component,
+    which is safe only because validate_loaded_data() rejects a value whose components span
+    more than one locus. Without that, a composite like "IGHV1-8,TRGJ1" would be plotted on
+    the strength of its first component and offer the second's allele under the wrong gene.
+    Kept as one LIKE per locus because this has to be SQL the database can index, not Python.
+    """
     return or_(*(ImmuneDiscoverDataModel.gene.like(locus + '%') for locus in PLOT_LOCI))
 
 def is_deletion():
