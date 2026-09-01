@@ -103,6 +103,22 @@ def test_a_file_failing_after_a_full_batch_leaves_nothing_behind(loader_app):
     assert loaded == {"first.tsv"}
 
 
+def test_a_missing_data_directory_still_names_the_archives(loader_app):
+    # data/in/ is gitignored and dockerignored, so it exists only because extractall creates
+    # it. With no archive to extract there was nothing to create it, and listing it raised
+    # FileNotFoundError before the message that says to check data/compressed/ - unreachable
+    # in exactly the case it describes.
+    _, in_dir = loader_app
+    in_dir.rmdir()
+
+    with pytest.raises(SourceDataError) as raised:
+        load_tsv_to_db()
+
+    message = str(raised.value)
+    assert "No .tsv files found" in message
+    assert "data/compressed/" in message
+
+
 def test_a_file_duplicating_its_own_rows_says_so(loader_app):
     # One commit per file means a duplicate inside a single file is not caught until that
     # commit, so it arrives as the same IntegrityError as a duplicate of an already-loaded
@@ -160,3 +176,36 @@ def test_a_row_the_loader_cannot_parse_rolls_back(loader_app):
     # so this reads back the partial load rather than nothing.
     assert rows_from("broken.tsv") == 0
     assert rows_from("first.tsv") == 10
+
+
+def test_create_app_does_not_return_an_app_when_there_is_no_data(tmp_path):
+    """create_app() must propagate a load failure instead of returning a routed app.
+
+    This is the guarantee the branch exists for: catching the error here logged it and
+    returned a fully routed app anyway, so the pod passed its readiness check and answered
+    requests against an empty database. Nothing else in the suite covers it - under
+    TestConfig the in-memory database has no tables when create_app runs, so it takes the
+    'table not found' branch and never reaches the loader, and the fixtures call
+    load_tsv_to_db() directly. Hence the file-backed database: the table has to survive from
+    the first create_app to the second.
+    """
+    data_dir = tmp_path / "data"
+    (data_dir / "compressed").mkdir(parents=True)
+    (data_dir / "in").mkdir()
+
+    class FileConfig(TestConfig):
+        SQLALCHEMY_DATABASE_URI = "sqlite:///" + str(tmp_path / "t.db")
+        DATA_DIR = str(data_dir) + "/"
+
+    # First call stands in for a fresh container before 'flask db upgrade': no table, so the
+    # loader is skipped and an app comes back.
+    first = create_app(FileConfig)
+    with first.app_context():
+        db.create_all()
+        db.session.remove()
+
+    # Second call is the real startup. The table is there now, the source data is not.
+    with pytest.raises(SourceDataError) as raised:
+        create_app(FileConfig)
+
+    assert "No .tsv files found" in str(raised.value)

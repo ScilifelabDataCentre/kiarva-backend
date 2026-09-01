@@ -209,19 +209,34 @@ def get_igsnper_data(args):
         abort(404, message="No IgSNPer data for the requested allele.")
     return data
 
+# The two amino acid lookups below answered a name they could not resolve with 200 and an
+# empty body - {} and {"aa_allele_list": null} - while every sibling on this blueprint had
+# been moved to a 404. The frontend reads both through getJson(..., fallback), which turns a
+# rejected request into the same fallback the empty body produced, so this is the same answer
+# said properly rather than a change of behaviour for it.
 @blp.route("/data/aminoacidalleles")
 @api_key_required
 @blp.arguments(AminoAcidAlleleNameArgs, location="query")
 @blp.response(200, AminoAcidTopAlleleSchema)
+@blp.alt_response(404, description="No amino acid allele for the requested name")
 def get_aa_top_allele(args):
-    return get_aminoacid_top_allele(args["aa_allele_name"])
+    top_allele = get_aminoacid_top_allele(args["aa_allele_name"])
+    if not top_allele.get("allele_aa"):
+        abort(404, message="No amino acid allele for the requested name.")
+
+    return top_allele
 
 @blp.route("/data/aminoacidlist")
 @api_key_required
 @blp.arguments(AminoAcidAlleleNameArgs, location="query")
 @blp.response(200, AminoAcidAlleleListSchema)
+@blp.alt_response(404, description="No amino acid allele list for the requested name")
 def get_aminoacid_list(args):
-    return get_aminoacid_allele_list(args["aa_allele_name"])
+    allele_list = get_aminoacid_allele_list(args["aa_allele_name"])
+    if not allele_list.get("aa_allele_list"):
+        abort(404, message="No amino acid allele list for the requested name.")
+
+    return allele_list
 
 @blp.route("/data/populationregions")
 @api_key_required

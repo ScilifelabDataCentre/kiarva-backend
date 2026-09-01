@@ -636,6 +636,19 @@ def test_a_master_amino_acid_allele_of_null_has_no_table(app):
     assert create_frequencies_table("IGHV9-99*01", "aminoacid") is None
 
 
+def test_the_amino_acid_lookups_404_a_name_they_cannot_resolve(client):
+    # Both used to answer 200 with an empty body - {} and {"aa_allele_list": null} - while
+    # every sibling on the blueprint 404s. The frontend reads them through
+    # getJson(url, fallback), which turns a rejected request into the same fallback the empty
+    # body produced, so the answer is unchanged for the only caller there is.
+    for endpoint, param in (("/data/aminoacidalleles", "aa_allele_name"),
+                            ("/data/aminoacidlist", "aa_allele_name")):
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} answered for {absent}"
+
+
 def test_aminoacidfrequencies_table_gene(client):
     # Requesting a whole gene returns one block of rows per amino acid allele of that
     # gene, each carrying the list of alleles collapsed into it.

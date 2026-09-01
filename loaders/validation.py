@@ -128,11 +128,42 @@ def amino_acid_coverage_problems(unknown_loci = ()):
 
     return problems
 
-def unrecognised_loci():
-    """Gene names in the data whose locus is not one the app knows how to present."""
-    genes = {row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
+def gene_column_values():
+    return {row[0] for row in ImmuneDiscoverDataModel.query.with_entities(
         ImmuneDiscoverDataModel.gene).distinct().all()}
-    return sorted(gene for gene in genes if locus_of(gene) is None)
+
+def unrecognised_loci():
+    """Gene column values naming a gene whose locus is not one the app knows to present.
+
+    Tested per comma-separated component. The column can hold two gene names at once - the
+    loader builds "IGHV3-30,IGHV3-30-5" itself - and locus_of() prefix-matches whatever it is
+    given, so asking it about the whole value returns the first component's locus and never
+    looks at the rest. A composite whose second component belonged to an unknown locus was
+    therefore reported by nothing, and in_plot_loci() matched it on the first component's
+    prefix - so its allele was offered under the wrong gene and resolved to the wrong
+    db_name, which is the silent wrong answer this check exists to prevent.
+
+    The whole column value is returned rather than the offending component, because that is
+    what amino_acid_coverage_problems() filters those rows out by.
+    """
+    return sorted(gene for gene in gene_column_values()
+                  if any(locus_of(component) is None for component in gene.split(",")))
+
+def mixed_locus_genes():
+    """Gene column values naming genes from more than one locus.
+
+    Everything that matches a locus by prefix - in_plot_loci(), never_translated(),
+    locus_of() itself - reads the whole column value, so a value spanning two loci is plotted
+    or translated according to whichever comes first. The comma-separated values in the data
+    are all one locus (they come from one rewrite dictionary, every entry IGHV), and this is
+    what keeps that true, so the prefix matching elsewhere does not have to be per component.
+    """
+    mixed = []
+    for gene in gene_column_values():
+        loci = {locus_of(component) for component in gene.split(",")}
+        if len(loci) > 1 and None not in loci:
+            mixed.append(gene)
+    return sorted(mixed)
 
 def locus_problems(unknown):
     """Every locus in the data must be one the app knows how to present.
@@ -150,6 +181,17 @@ def locus_problems(unknown):
             + ". Add the locus to KNOWN_LOCI in repositories/filters.py once it is decided "
             "whether it should be plotted, which also decides whether its alleles are "
             "expected to be translated"]
+
+def mixed_locus_problems():
+    """A gene column value must not name genes from more than one locus."""
+    mixed = mixed_locus_genes()
+    if not mixed:
+        return []
+
+    return [str(len(mixed)) + " gene value(s) name genes from more than one locus, so every "
+            "prefix match on that column - whether the row is plotted, whether it is expected "
+            "to be translated, which locus it is reported as - answers on whichever component "
+            "comes first: " + sample_names([(g,) for g in mixed])]
 
 def igsnper_consistency_problems():
     """An allele's IgSNPer values must not differ between the rows carrying it.
@@ -261,6 +303,7 @@ def validate_loaded_data():
     unknown_loci = unrecognised_loci()
 
     problems = (locus_problems(unknown_loci)
+                + mixed_locus_problems()
                 + amino_acid_coverage_problems(unknown_loci)
                 + igsnper_consistency_problems()
                 + population_problems()
