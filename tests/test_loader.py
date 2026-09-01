@@ -7,6 +7,8 @@
 # skipped it and the data stayed silently truncated.
 
 import csv
+import os
+import subprocess
 
 import pytest
 
@@ -14,6 +16,7 @@ from app import create_app, db
 from config import TestConfig
 from loaders import load_tsv_to_db, SourceDataError
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from constants import ROOT_DIR
 
 # The loader reads these by name; the rest of the source columns are ignored.
 COLUMNS = [
@@ -52,11 +55,14 @@ def write_tsv(path, indices):
 
 
 @pytest.fixture
-def loader_app(tmp_path):
+def loader_app(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     (data_dir / "in").mkdir(parents=True)
     (data_dir / "compressed").mkdir()
 
+    # See the note in conftest.py: the schema is created below, so this call has to say it is
+    # not the server.
+    monkeypatch.setenv("SKIP_DATA_LOAD", "1")
     app = create_app(TestConfig)
     app.config["DATA_DIR"] = str(data_dir) + "/"
     with app.app_context():
@@ -178,7 +184,7 @@ def test_a_row_the_loader_cannot_parse_rolls_back(loader_app):
     assert rows_from("first.tsv") == 10
 
 
-def test_create_app_does_not_return_an_app_when_there_is_no_data(tmp_path):
+def test_create_app_does_not_return_an_app_when_there_is_no_data(tmp_path, monkeypatch):
     """create_app() must propagate a load failure instead of returning a routed app.
 
     This is the guarantee the branch exists for: catching the error here logged it and
@@ -197,15 +203,58 @@ def test_create_app_does_not_return_an_app_when_there_is_no_data(tmp_path):
         SQLALCHEMY_DATABASE_URI = "sqlite:///" + str(tmp_path / "t.db")
         DATA_DIR = str(data_dir) + "/"
 
-    # First call stands in for a fresh container before 'flask db upgrade': no table, so the
-    # loader is skipped and an app comes back.
+    # A missing table is only acceptable from the migration step, which says so with
+    # SKIP_DATA_LOAD. Without that, returning a routed app is the failure this branch exists
+    # to stop: /health has no database in it, so readiness passes while every data endpoint
+    # raises "no such table".
+    with pytest.raises(SourceDataError) as raised:
+        create_app(FileConfig)
+    assert "does not exist" in str(raised.value)
+
+    # With it set, an app comes back and the migration can create the schema.
+    monkeypatch.setenv("SKIP_DATA_LOAD", "1")
     first = create_app(FileConfig)
     with first.app_context():
         db.create_all()
         db.session.remove()
+    monkeypatch.delenv("SKIP_DATA_LOAD")
 
-    # Second call is the real startup. The table is there now, the source data is not.
+    # Then the real startup: the table is there now, the source data is not.
     with pytest.raises(SourceDataError) as raised:
         create_app(FileConfig)
 
     assert "No .tsv files found" in str(raised.value)
+
+
+def test_entrypoint_does_not_start_the_server_after_a_failed_migration(tmp_path):
+    """docker/entrypoint.sh must stop on a failed migration, and only flag the migration.
+
+    Without set -e the script carried on to exec gunicorn, which then answered its readiness
+    check while every data endpoint raised "no such table" - the same silent degradation the
+    try/except in create_app used to cause, one process over. flask and gunicorn are stubbed
+    because what is under test is the script's control flow, not either program.
+    """
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    (stubs / "flask").write_text(
+        '#!/usr/bin/env bash\n'
+        'echo "flask $* SKIP_DATA_LOAD=${SKIP_DATA_LOAD:-unset}"\n'
+        'exit ${FAKE_MIGRATION_EXIT:-0}\n')
+    (stubs / "gunicorn").write_text(
+        '#!/usr/bin/env bash\necho "gunicorn SKIP_DATA_LOAD=${SKIP_DATA_LOAD:-unset}"\n')
+    for stub in stubs.iterdir():
+        stub.chmod(0o755)
+
+    script = ROOT_DIR + "/docker/entrypoint.sh"
+    env = {**os.environ, "PATH": str(stubs) + os.pathsep + os.environ["PATH"]}
+
+    started = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert started.returncode == 0
+    # The migration is told it is not the server, and the server is not told it is.
+    assert "flask db upgrade SKIP_DATA_LOAD=1" in started.stdout
+    assert "gunicorn SKIP_DATA_LOAD=unset" in started.stdout
+
+    failed = subprocess.run(["bash", script], capture_output=True, text=True,
+                            env={**env, "FAKE_MIGRATION_EXIT": "1"})
+    assert failed.returncode != 0, "a failed migration did not stop the boot"
+    assert "gunicorn" not in failed.stdout, "the server was started anyway"

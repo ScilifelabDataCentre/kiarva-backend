@@ -10,10 +10,12 @@
 #   - Recording loaded files in loaded_from_tsv only skips work within one container's
 #     lifetime. A restart starts from an empty database and re-reads everything.
 #   - 'flask db upgrade' in docker/entrypoint.sh runs against a database that has no tables
-#     yet, which is why the loader below has a branch for that and does not treat it as an
-#     error. It is needed on every fresh SQLite file and implies nothing about persistence.
+#     yet, and has to build an app through this factory to do it. That step sets
+#     SKIP_DATA_LOAD to say so. It is needed on every fresh SQLite file and implies nothing
+#     about persistence.
 
 import copy
+import os
 
 from flask import Flask
 from flask_smorest import Api
@@ -55,14 +57,26 @@ def create_app(config_class=None):
     # anyway - so the pod passed its readiness check and answered requests against an
     # empty database. Letting it raise means the worker never boots, the pod never
     # becomes ready, and the previous one goes on serving.
+    # SKIP_DATA_LOAD is how a process states that it is not the server: docker/entrypoint.sh
+    # sets it for 'flask db upgrade', which cannot have the tables it is about to create. It
+    # is checked before the table is looked at, because the whole point is that there is
+    # nothing to look at yet.
+    if os.environ.get("SKIP_DATA_LOAD"):
+        print("SKIP_DATA_LOAD is set: no data loaded and nothing validated.", flush = True)
+        return app
+
+    # Anywhere else, a missing table means the migration did not run - and answering that by
+    # printing a note and returning a routed app was the same silent degradation the removed
+    # try/except used to cause. It is the shape that is hardest to notice, because /health
+    # has no database in it: readiness passes and every data endpoint raises "no such table".
     with app.app_context():
-        inspector = inspect(db.engine)
-        if "immunediscoverdata" in inspector.get_table_names():
-            load_tsv_to_db()
-            load_plot_data_to_dict()
-        else:
-            # Not an error: the table does not exist yet on a first-time setup, before
-            # 'flask db upgrade' has run.
-            print("Table 'immunediscoverdata' not found (if first-time setup, retry after DB upgrade).")
+        if "immunediscoverdata" not in inspect(db.engine).get_table_names():
+            raise SourceDataError(
+                "Table 'immunediscoverdata' does not exist, so there is no data to serve. "
+                "'flask db upgrade' has to run first - docker/entrypoint.sh does that on "
+                "every start, and locally it is a one-off after cloning.")
+
+        load_tsv_to_db()
+        load_plot_data_to_dict()
 
     return app

@@ -242,6 +242,12 @@ Set up the local database using Flask-Migrate:
 flask db upgrade
 ```
 
+This has to happen before the app will start: without the table, `create_app()` raises
+rather than serving an empty database. The migration itself does not load any data — it
+runs with `SKIP_DATA_LOAD=1`, which is also what `docker/entrypoint.sh` does on every
+container start, for the same reason: the flask CLI builds the app to run the migration,
+and at that point the tables it is about to create do not exist.
+
 ##### Install MAFFT (Required for Sequence Alignment)
 
 The app uses the external tool MAFFT for gene sequence alignment. To install it:
