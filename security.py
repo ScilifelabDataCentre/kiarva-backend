@@ -4,6 +4,10 @@ import functools
 from flask import request
 from flask_smorest import abort
 
+# Query parameter validation used to live here as validated_name(). It is now declared by
+# the marshmallow schemas in schemas.py, which flask_smorest applies before a view runs -
+# see NAME_PATTERN there for the character set these names are held to.
+
 def is_valid(api_key):
     return os.getenv("API_KEY") == api_key
 

@@ -4,8 +4,10 @@ import os
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Dicts that will contain pre-loaded frequency plot data, if not running
-# 'TESTING' or 'DEBUG'
+# Dicts holding the pre-calculated frequency plot data, filled by
+# loaders/plot_loader.py at startup in every mode. Module-level, and imported by name
+# elsewhere, so plot_loader fills them with update() rather than rebinding - and the pytest
+# fixture clears them between tests, since they outlive the app that filled them.
 allele_superpopulation_frequencies = {}
 allele_population_frequencies = {}
 aminoacid_allele_superpopulation_frequencies = {}

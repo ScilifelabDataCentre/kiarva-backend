@@ -8,6 +8,7 @@
 # Function input - [IGHV1-2*], output [01]
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
+from repositories.filters import plot_selection_criteria
 from utils.regex import plot_options_regex
 
 def get_plot_options(selection):
@@ -19,18 +20,30 @@ def get_plot_options(selection):
     # if '*' exists in function input, that means we are expecting an
     # 'allele' output, which means the last part of the selection
     select_allele = ('*' in selection)
+
+    # '*' with nothing in front of it is not a gene. plot_options_regex('') builds
+    # ',{0,1}(,|$)', which matches every gene, so "*" answered with every plottable allele
+    # in the data instead of nothing. '*' passes NAME_PATTERN - it is a legitimate character
+    # in an allele name - so the schema cannot reject it and the check belongs here.
+    if select_allele and not selection[:-1]:
+        return data_out
+
     
     if (not select_allele):
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.gene
-            ).distinct().filter(ImmuneDiscoverDataModel.gene.like(selection+'%')).all()
+            # startswith(autoescape=True) rather than like(selection + '%'): the selection
+            # comes from a request, and LIKE reads '_' as a single-character wildcard. A
+            # selection of "_" matched every gene. '%' is already rejected by the schema,
+            # but '_' cannot be - it is a legitimate character in allele names.
+            ).distinct().filter(ImmuneDiscoverDataModel.gene.startswith(selection, autoescape=True)).filter(*plot_selection_criteria()).all()
     else:
         data = ImmuneDiscoverDataModel.query.with_entities(
             ImmuneDiscoverDataModel.allele,
             ImmuneDiscoverDataModel.gene
             # selection[:-1] to omit the '*' from query
             # i.e. input "IGHV1-2*"" -> match "IGHV1-2"
-            ).distinct().filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(selection[:-1]))).all()
+            ).distinct().filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(selection[:-1]))).filter(*plot_selection_criteria()).all()
 
     try:
         for row in data:

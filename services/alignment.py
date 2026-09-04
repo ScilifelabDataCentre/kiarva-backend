@@ -10,6 +10,7 @@ import subprocess
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from utils import dict_to_fasta_str, fasta_to_dict
+from repositories.filters import is_deletion, plot_selection_criteria
 from utils.regex import plot_options_regex
 from utils.translation import translate
 
@@ -119,7 +120,19 @@ def align_sequences(gene):
     ImmuneDiscoverDataModel.db_name,
     ImmuneDiscoverDataModel.sequence,
     ImmuneDiscoverDataModel.gene
-    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).distinct().all()
+    # plot_selection_criteria() rather than an ad hoc '_F' filter: repositories/filters.py
+    # says IGHD and IGHJ rows must never be offered as a plot or alignment selection, and
+    # this was the one query in that family still missing the locus restriction - so an
+    # alignment came back for a gene /data/plotoptions no longer offers.
+    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(*plot_selection_criteria()).filter(~is_deletion()).distinct().all()
+
+    # Nothing to align is not an alignment. Handed an empty set, MAFFT gets an empty input
+    # file and fasta_to_dict reads one blank record back out of the empty output, so this
+    # answered 200 with [{'allele': '', 'sequence_nt': '', 'sequence_aa': ''}] for any gene
+    # that has no sequences - including every gene outside the plotted loci now that the
+    # query above is restricted to them. The resource turns None into a 404.
+    if not sequence_data:
+        return None
 
     nt_seq_dict = {}
     for row in sequence_data:
