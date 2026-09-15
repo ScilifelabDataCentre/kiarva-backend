@@ -14,4 +14,4 @@ pyzipper==0.4.0
 
 # Development and CI only (locked in requirements-dev.txt)
 pytest==9.1.1
-pytest-env==1.7.0
+pytest-env==1.7.1
