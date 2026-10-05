@@ -6,10 +6,13 @@
 # with gaps.
 
 import os
+import shutil
 import subprocess
+import tempfile
 
 from models.immunediscoverdata import ImmuneDiscoverDataModel
 from utils import dict_to_fasta_str, fasta_to_dict
+from repositories.filters import is_deletion, plot_selection_criteria
 from utils.regex import plot_options_regex
 from utils.translation import translate
 
@@ -20,28 +23,27 @@ from utils.translation import translate
 def align_with_mafft(seq_dict):
     fasta_str = dict_to_fasta_str(seq_dict)
 
-    tmp_path = os.getcwd() + "/tmp/"
-    input_file = "unaligned_fasta_tmp.fasta"
-    output_file = "aligned_fasta_tmp.fasta"
-    if not os.path.exists(tmp_path):
-        os.makedirs(tmp_path)
-    f = open(tmp_path + input_file, "w")
-    f.write(fasta_str)
-    f.close()
+    # A private directory per call. These were fixed filenames under os.getcwd() + "/tmp/",
+    # so two alignments running at once - two gunicorn workers, or two threads in one - wrote
+    # the same input file and read the same output file. The loser silently returned a blank
+    # record or, worse, the other request's alignment, and both went out as 200.
+    tmp_path = tempfile.mkdtemp(prefix="mafft-")
+    input_file = os.path.join(tmp_path, "unaligned.fasta")
+    output_file = os.path.join(tmp_path, "aligned.fasta")
     try:
-        with open(tmp_path + output_file, "w") as out_f:
-            subprocess.run(["mafft", "--auto", "--quiet", tmp_path + input_file], 
-                           stdout=out_f, 
+        with open(input_file, "w") as f:
+            f.write(fasta_str)
+        # check=True and no except: a failed alignment used to be printed and then read back
+        # out of the output file anyway, which is empty - so MAFFT failing looked exactly
+        # like a gene with no sequences and was served as a 200. Letting it raise makes it
+        # a 500, which is what a failure to produce the answer is.
+        with open(output_file, "w") as out_f:
+            subprocess.run(["mafft", "--auto", "--quiet", input_file],
+                           stdout=out_f,
                            check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Command failed: {e}")
-    
-    result = fasta_to_dict(output_file)
-
-    if os.path.exists(tmp_path + input_file):
-        os.remove(tmp_path + input_file)
-    if os.path.exists(tmp_path + output_file):
-        os.remove(tmp_path + output_file)
+        result = fasta_to_dict(output_file)
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
 
     return dict(sorted(result.items()))
 
@@ -119,7 +121,19 @@ def align_sequences(gene):
     ImmuneDiscoverDataModel.db_name,
     ImmuneDiscoverDataModel.sequence,
     ImmuneDiscoverDataModel.gene
-    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(~ImmuneDiscoverDataModel.db_name.contains('_F', autoescape=True)).filter(ImmuneDiscoverDataModel.db_name.notlike('%*DEL')).distinct().all()
+    # plot_selection_criteria() rather than an ad hoc '_F' filter: repositories/filters.py
+    # says IGHD and IGHJ rows must never be offered as a plot or alignment selection, and
+    # this was the one query in that family still missing the locus restriction - so an
+    # alignment came back for a gene /data/plotoptions no longer offers.
+    ).filter(ImmuneDiscoverDataModel.gene.regexp_match(plot_options_regex(gene))).filter(*plot_selection_criteria()).filter(~is_deletion()).distinct().all()
+
+    # Nothing to align is not an alignment. Handed an empty set, MAFFT gets an empty input
+    # file and fasta_to_dict reads one blank record back out of the empty output, so this
+    # answered 200 with [{'allele': '', 'sequence_nt': '', 'sequence_aa': ''}] for any gene
+    # that has no sequences - including every gene outside the plotted loci now that the
+    # query above is restricted to them. The resource turns None into a 404.
+    if not sequence_data:
+        return None
 
     nt_seq_dict = {}
     for row in sequence_data:

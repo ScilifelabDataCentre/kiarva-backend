@@ -1,7 +1,5 @@
 # Utility scripts for handling fasta conversions.
 
-import os
-
 # Converts a dict with {allele, sequence} into a string in fasta format
 def dict_to_fasta_str(sequence_data):
     fasta_out = ''
@@ -10,8 +8,7 @@ def dict_to_fasta_str(sequence_data):
     return fasta_out
 
 # Reads a fasta file and converts the content to a dict with {allele, sequence} format
-def fasta_to_dict(fasta_filename):
-    fasta_path = os.getcwd() + "/tmp/" + fasta_filename
+def fasta_to_dict(fasta_path):
     sequence_data = {}
     fasta_strings = []
     try:
