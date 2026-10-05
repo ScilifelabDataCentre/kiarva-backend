@@ -31,14 +31,15 @@ def get_aminoacid_allele_list(aa_allele_name):
     if len(aa_allele_data) == 0:
         return {'aa_allele_list': None}
     
-    aa_allele_list = []
-    
-    if len(aa_allele_data[0][1]) > 0:
-        aa_allele_list = aa_allele_data[0][1].split(',')
-    else:
+    # Testing the value rather than its length: db_name_AA_list is nullable, and len(None)
+    # raises where this function already has an answer for "no list". validate_loaded_data()
+    # requires the column wherever db_name_AA is set, so this is the second line of defence
+    # rather than the only one - but it is the same shape as the fix in repositories/igsnper.py,
+    # and a function that already reports absence should not raise on it.
+    if not aa_allele_data[0][1]:
         return {'aa_allele_list': None}
 
-    return {'aa_allele_list': aa_allele_list}
+    return {'aa_allele_list': aa_allele_data[0][1].split(',')}
 
 # Several different alleles can translate to the same amino acid, the
 # amino acid lists contain the names of such alleles under one master amino acid

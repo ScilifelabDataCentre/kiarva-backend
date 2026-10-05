@@ -5,7 +5,10 @@
 # rather than shapes wherever the dataset makes that possible, so both files have to
 # be read together when either changes.
 
+import copy
 import os
+
+import pytest
 
 from urllib.parse import quote
 
@@ -150,7 +153,10 @@ def test_populationfrequencies(client):
     assert [entry["population"] for entry in data] == EXPECTED_POPULATIONS
 
     frequencies = frequency_dict(data)
-    # MSL carries only IGHV1-8*DEL and CDX only *04, so neither has the allele.
+    # MSL carries only IGHV1-8*DEL and CDX only *04, so neither has the allele. Asserting
+    # the full population list above and these zeroes here is what pins the zero fill:
+    # GROUP BY returns no row for a population with no carriers, so they have to be filled
+    # back in rather than left out.
     assert frequencies["MSL"] == (0, 0.0)
     assert frequencies["CDX"] == (0, 0.0)
     # TSI is the only population with two cases, one of which carries *02 instead.
@@ -173,13 +179,171 @@ def test_aminoacid_populationfrequencies(client):
     assert [entry["population"] for entry in data] == EXPECTED_POPULATIONS
 
     frequencies = frequency_dict(data)
-    # Only MSL, which has no IGHV1-8 sequence at all, is missing the amino acid allele.
+    # These exact figures are what pin the amino acid denominator. case_MSL_AFR carries only
+    # IGHV1-8*DEL, so it has no amino acid row at all - and it still counts as an individual,
+    # which is why ALL below is 25 of 26 rather than 25 of 25. Restricting the denominator to
+    # cases that have amino acid data is a silent mistake on the real dataset, where every
+    # case happens to have some; here it turns these numbers into 1.0.
     assert frequencies["MSL"] == (0, 0.0)
     # CDX (*04) and TSI (*02 plus *01) both collapse into IGHV1-8*01, so unlike the
     # genomic frequencies above they come out at 1.0.
     assert frequencies["CDX"] == (1, 1.0)
     assert frequencies["TSI"] == (2, 1.0)
     assert frequencies["ALL"] == (25, 0.96154)
+
+
+FREQUENCY_ENDPOINTS = (
+    ("/data/frequencies/superpopulations", "allele_name"),
+    ("/data/frequencies/populations", "allele_name"),
+    ("/data/aminoacidfrequencies/superpopulations", "aa_allele_name"),
+    ("/data/aminoacidfrequencies/populations", "aa_allele_name"),
+)
+
+
+def test_frequencies_missing_allele_name(client):
+    # A request with no allele name is a client error, not a plot of zeroes. In prod the
+    # amino acid dicts used to hold a None key - db_name_AA is null on every row that is
+    # not plottable, and SELECT DISTINCT returns that null as an allele - so the missing
+    # parameter looked up that key and returned an all-zero plot with a 200. The schemas
+    # make it a 422, the code webargs uses for a request that fails validation.
+    for endpoint, _ in FREQUENCY_ENDPOINTS:
+        assert get(client, endpoint).status_code == 422
+
+
+def test_frequencies_malformed_allele_name(client):
+    # Allele names use a narrow character set, so the schema rejects anything outside it
+    # before the view runs. The payloads below are the shapes a scanner worries about:
+    # markup, a quote break-out, an injection attempt and an over-long value.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        for value in ("<script>alert(1)</script>", "IGHV1-8*01'\"", "IGHV1-8*01 OR 1=1", "A" * 65):
+            res = get(client, url(endpoint, **{param: value}))
+            assert res.status_code == 422, f"{endpoint} accepted {value!r}"
+
+            # Whatever the response says, it must not contain the rejected value: that
+            # reflection is the actual vulnerability, independent of content type.
+            assert value not in res.get_data(as_text=True)
+
+    # A legitimate name with every special character the dataset uses still gets through.
+    res = get(client, url("/data/frequencies/superpopulations", allele_name=TWO_GENE_ALLELE))
+    assert res.status_code == 200
+
+
+def test_frequency_table_does_not_mutate_the_precalculated_dicts(app):
+    # Building the tsv writes 'allele' and 'superpopulation' into each entry. Done in place,
+    # those keys leaked into every later response from the plot endpoints for that allele.
+    # No flag flipping needed any more: the dictionaries are the only source in every mode.
+    from constants import allele_superpopulation_frequencies
+    from services.frequencies import create_frequencies_table
+
+    cached_before = copy.deepcopy(allele_superpopulation_frequencies[TEST_ALLELE])
+
+    table = create_frequencies_table(TEST_ALLELE, "genomic")
+
+    assert allele_superpopulation_frequencies[TEST_ALLELE] == cached_before
+    assert table.splitlines()[0].split("\t") == [
+        "allele", "population", "superpopulation", "frequency", "n",
+    ]
+
+
+def test_frequency_tables_are_offered_only_for_plottable_alleles(client):
+    # The download option only appears in the frontend once an allele has been selected to
+    # plot, so the endpoint covers the same set. Everything reported comes from the
+    # pre-calculated dictionaries, so a non-plottable name has no table rather than a table
+    # of zeroes naming an allele that does not exist.
+    for endpoint, param in (
+        ("/data/frequencies/table/allele", "allele_name"),
+        ("/data/aminoacidfrequencies/table/allele", "aa_allele_name"),
+    ):
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+            assert absent not in res.get_data(as_text=True)
+
+    for endpoint, param in (
+        ("/data/frequencies/table/gene", "gene_name"),
+        ("/data/aminoacidfrequencies/table/gene", "aa_gene_name"),
+    ):
+        assert get(client, url(endpoint, **{param: TEST_GENE})).status_code == 200
+        for absent in ("IGHV9-99", "IGHD1-1"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} served a table for {absent}"
+
+
+def test_underscore_is_not_a_like_wildcard(client):
+    # LIKE reads '_' as a single-character wildcard. These endpoints matched on
+    # like(value + '%') with the raw parameter, so a value of "_" matched everything:
+    # /fasta/genomic returned 11 of the 14 sequences in the mock data instead of none.
+    # '_' cannot be rejected by the schema the way '%' is - it is legitimate in allele
+    # names like IGHV1-58*02_S3393 - so the query has to escape it.
+    res = get(client, url("/data/plotoptions", current_selection="_"))
+    assert res.status_code == 200
+    assert res.get_json() == []
+
+    for endpoint in ("/fasta/genomic", "/fasta/genomic_fl", "/fasta/translated"):
+        res = get(client, url(endpoint, file_name="_"))
+        assert res.status_code == 200
+        assert res.get_data(as_text=True) == "", f"{endpoint} treated '_' as a wildcard"
+
+    # A real prefix still matches, so the escaping has not broken ordinary lookups.
+    res = get(client, url("/fasta/genomic", file_name=TEST_GENE))
+    assert res.get_data(as_text=True).count(">") == 3
+
+
+def test_igsnperdata_score_without_snps(client):
+    # A score with no SNPs is the majority shape in the real data - 209,867 rows - and not a
+    # contradiction: the score counts uncommon SNPs, so 0.0 means there were none to list and
+    # the column is empty, which the loader stores as NULL. Taking len() of that null raised
+    # TypeError and answered 500 for 29 of the 732 plottable alleles. IGHV1-69*04_S7754 is
+    # the mock allele carrying this shape; asserting on an allele that has SNPs would pass
+    # either way and guard nothing.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV1-69*04_S7754"))
+    assert res.status_code == 200
+    assert res.get_json() == {"igSNPer_score": 0.0, "igSNPer_SNPs": []}
+
+
+def test_openapi_documents_the_404s_and_the_api_key(client):
+    # The spec is what /swagger-ui renders. Without the security scheme the page offers no
+    # way to send X-api-key, so every "Try it out" comes back 400.
+    spec = get(client, "/openapi.json").get_json()
+
+    assert spec["components"]["securitySchemes"]["ApiKeyAuth"]["name"] == "X-api-key"
+    assert spec["security"] == [{"ApiKeyAuth": []}]
+
+    for path in (
+        "/data/frequencies/superpopulations",
+        "/data/frequencies/populations",
+        "/data/aminoacidfrequencies/superpopulations",
+        "/data/aminoacidfrequencies/populations",
+        "/data/igsnperdata",
+    ):
+        assert "404" in spec["paths"][path]["get"]["responses"], f"{path} does not document its 404"
+
+    # The downloads have no schema, so blp.response(content_type=...) documented nothing for
+    # them; the body is declared through blp.doc instead.
+    fasta = spec["paths"]["/fasta/genomic"]["get"]["responses"]["200"]
+    assert "text/x-fasta" in fasta["content"]
+    table = spec["paths"]["/data/frequencies/table/allele"]["get"]["responses"]["200"]
+    assert "text/tab-separated-values" in table["content"]
+
+
+def test_igsnperdata_unknown_allele(client):
+    # An allele that is not in the data at all yields no rows. Indexing the empty result
+    # raised IndexError and surfaced as a 500; it is a 404. This is distinct from an allele
+    # that exists with no IgSNPer columns, which is still a 200 - see the test below.
+    res = get(client, url("/data/igsnperdata", allele_name="IGHV9-99*99"))
+    assert res.status_code == 404
+
+
+def test_frequencies_unknown_allele_is_404_in_every_mode(client):
+    # Plottability used to be read off the dictionaries pre-calculated at startup, which are
+    # only populated in prod, so this request 404d there and returned a 200 all-zero plot
+    # under pytest - leaving the 404 impossible to cover. Both modes now agree.
+    for endpoint, param in FREQUENCY_ENDPOINTS:
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} returned {res.status_code} for {absent}"
 
 
 def test_igsnperdata(client):
@@ -245,13 +409,22 @@ def test_plotoptions_genes(client):
     assert get(client, url("/data/plotoptions", current_selection="IGHV")).get_json() == [
         "1-69", "1-8", "3-23", "3-30", "3-30-5",
     ]
-    assert get(client, url("/data/plotoptions", current_selection="IGHD")).get_json() == ["1-1"]
-    assert get(client, url("/data/plotoptions", current_selection="IGHJ")).get_json() == ["6"]
+    # Only IGHV and TRGV are plotted. The research group has specified that IGHD and
+    # IGHJ are not to be offered as plot or MSA selections, so they yield no options
+    # even though their rows are loaded for the FASTA downloads.
+    assert get(client, url("/data/plotoptions", current_selection="IGHD")).get_json() == []
+    assert get(client, url("/data/plotoptions", current_selection="IGHJ")).get_json() == []
+
+    # A '*' with no gene in front of it selects nothing. plot_options_regex("") builds
+    # ',{0,1}(,|$)', which matches every gene, so this answered with every plottable allele
+    # in the data. '*' is legal in an allele name, so NAME_PATTERN cannot reject it.
+    assert get(client, url("/data/plotoptions", current_selection="*")).get_json() == []
 
 
 def test_plotoptions_alleles(client):
-    # Allele lists per gene. The flanking IGHV1-8*01_F1 row repeats allele "01" and so
-    # adds nothing here, while the homozygous deletion is offered as "DEL".
+    # Allele lists per gene. The flanking IGHV1-8*01_F1 row is excluded outright, and
+    # for V genes it repeats allele "01" anyway so it would add nothing here. The
+    # homozygous deletion is offered as "DEL".
     res = get(client, url("/data/plotoptions", current_selection=TEST_GENE + "*"))
     assert res.status_code == 200
     assert res.get_json() == ["01", "02", "04", "DEL"]
@@ -269,10 +442,10 @@ def test_plotoptions_alleles(client):
         "03_S1123", TWO_GENE_ALLELE,
     ]
 
-    # D and J flanking rows, unlike V ones, do suffix the allele column.
-    assert get(client, url("/data/plotoptions", current_selection="IGHD1-1*")).get_json() == [
-        "01", "01_F1",
-    ]
+    # D and J flanking rows, unlike V ones, do suffix the allele column - so before
+    # IGHD was excluded this gene offered a selectable "01_F1". It now offers nothing,
+    # both because the locus is not plotted and because _F rows are filtered out.
+    assert get(client, url("/data/plotoptions", current_selection="IGHD1-1*")).get_json() == []
 
 
 def test_db_name(client):
@@ -285,6 +458,18 @@ def test_db_name(client):
     # A gene whose alleles are only reachable through the two-gene db_name.
     res = get(client, url("/data/db_name", selection=f"IGHV3-30-5,{TWO_GENE_ALLELE}"))
     assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+    res = get(client, url("/data/db_name", selection=f"IGHV3-30,{TWO_GENE_ALLELE}"))
+    assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+
+    # The same row named by the composite gene the loader actually stored. The selection is
+    # split on its last comma, because a gene value can contain one itself; splitting on
+    # every comma made this a 422. The frontend sends one component at a time, which is why
+    # that never showed up in production.
+    res = get(client, url("/data/db_name", selection=f"IGHV3-30,IGHV3-30-5,{TWO_GENE_ALLELE}"))
+    assert res.get_json() == {"db_name": TWO_GENE_ALLELE}
+
+    # A selection with no comma at all still cannot be split into a gene and an allele.
+    assert get(client, url("/data/db_name", selection=TEST_GENE)).status_code == 422
 
     # A gene the allele does not belong to.
     res = get(client, url("/data/db_name", selection=f"{TEST_GENE},03"))
@@ -321,19 +506,45 @@ def test_sequencesearch_skips_flanking_rows(client):
     # so a match inside a flanking region is not a match.
     res = get(client, url("/data/sequences", sequence_str=FLANKING_ONLY_SEQUENCE))
     assert res.status_code == 200
-    assert res.get_json() == [{"allele": "", "sequence": "", "position": []}]
+    # The no-match entry used to key its empty list as "position" while every matching
+    # entry used "positions", so the frontend - whose type declares positions - read
+    # undefined here. The response schema does not allow the two to disagree.
+    assert res.get_json() == [{"allele": "", "sequence": "", "positions": []}]
 
 
 def test_sequencesearch_no_match(client):
     res = get(client, url("/data/sequences", sequence_str="NOMATCHFORTHIS"))
     assert res.status_code == 200
-    assert res.get_json() == [{"allele": "", "sequence": "", "position": []}]
+    assert res.get_json() == [{"allele": "", "sequence": "", "positions": []}]
+
+
+def test_sequencesearch_rejects_wildcards_and_metacharacters(client):
+    # Sequences are letters and digits, so the schema rejects both the SQL LIKE wildcards
+    # ('%', '_') and the regex metacharacters that used to reach re.finditer.
+    for value in ("%", "_", "__________", "(", "[", "(a+)+", "<script>"):
+        res = get(client, url("/data/sequences", sequence_str=value))
+        assert res.status_code == 422, f"{value!r} was accepted"
+
+
+def test_sequence_search_escapes_like_wildcards(app):
+    # The schema now stops a wildcard reaching the query, so this covers the layer below
+    # it: .contains() without autoescape treated '%' and '_' as LIKE wildcards, matching
+    # every row, so a search for a single '%' returned the whole sequence table.
+    from services.sequence_search import sequence_search
+
+    empty = [{"allele": "", "sequence": "", "positions": []}]
+    assert sequence_search("%") == empty
+    assert sequence_search("_") == empty
+    # A real substring still matches, so the escaping has not broken ordinary searching.
+    assert sequence_search("ESEARCHTES")[0]["allele"] == "IGHV3-23*01"
 
 
 def test_send_fasta_genomic(client):
     res = get(client, url("/fasta/genomic", file_name="IGHV1-8"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # Alleles in name order, with the *DEL and flanking rows left out.
     assert res.get_data(as_text=True) == (
         ">IGHV1-8*01\nCTGGATTCACCTTTACTAGCTCTGCTATGCAGTGGGTGCGACAGGCTCGTGGACAACGCC\n"
@@ -346,7 +557,9 @@ def test_send_fasta_genomicwithflanking(client):
     # The frontend asks for a whole gene type at a time, as here.
     res = get(client, url("/fasta/genomic_fl", file_name="IGHV"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # Only the flanking rows, and their sequence includes the prefix and suffix.
     assert res.get_data(as_text=True) == (
         ">IGHV1-8*01_F1\nAGGTGCCCACTCC"
@@ -358,7 +571,9 @@ def test_send_fasta_genomicwithflanking(client):
 def test_send_fasta_translated(client):
     res = get(client, url("/fasta/translated", file_name="IGHV1-8"))
     assert res.status_code == 200
-    assert "text/plain" in res.content_type or "application/octet-stream" in res.content_type
+    # Served as text/x-fasta rather than the application/octet-stream mimetypes falls
+    # back to for an unknown ".fasta" extension.
+    assert "text/x-fasta" in res.content_type
     # One entry per amino acid allele: the three IGHV1-8 alleles share one.
     assert res.get_data(as_text=True) == ">IGHV1-8*01\nLDSPLLALLCSGCDRLVDNA\n"
 
@@ -383,6 +598,55 @@ def test_frequencies_table_allele(client):
     assert rows[1] == f"{TEST_ALLELE}\tAFR\tAFR\t0.85714\t6"
     assert f"{TEST_ALLELE}\tTSI\tEUR\t0.5\t1" in rows
     assert not [row for row in rows if "\tALL\t" in row]
+
+
+def test_aminoacid_table_for_a_name_with_no_master_is_a_404(client):
+    # get_aminoacid_top_allele returns {} when the name appears in no db_name_AA_list, and
+    # subscripting that was a KeyError and a 500. Reachable with any schema-valid name that
+    # has no translation: an allele not in the data, a flanking variant, an IGHD allele.
+    for name in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+        res = get(client, url("/data/aminoacidfrequencies/table/allele", aa_allele_name=name))
+        assert res.status_code == 404, name
+
+    # The genomic table of the same allele is unaffected - it needs no translation.
+    assert get(client, url("/data/frequencies/table/allele",
+                           allele_name=TEST_ALLELE)).status_code == 200
+
+
+def test_a_master_amino_acid_allele_of_null_has_no_table(app):
+    # get_aminoacid_top_allele returns {'allele': ..., 'allele_aa': None} for a row that
+    # carries db_name_AA_list without db_name_AA, and that dict is truthy - so guarding on it
+    # rather than on the master let allele_name become None and produced a table of zeroes
+    # naming an allele called "None". validate_loaded_data() rejects that row shape at
+    # startup, which is why reaching it means writing the row in behind the loader.
+    from db import db
+    from models.immunediscoverdata import ImmuneDiscoverDataModel
+    from services.frequencies import create_frequencies_table
+
+    row = ImmuneDiscoverDataModel.query.filter_by(db_name=TEST_ALLELE).first()
+    orphan = ImmuneDiscoverDataModel(**{
+        column.name: getattr(row, column.name)
+        for column in ImmuneDiscoverDataModel.__table__.columns if column.name != "id"
+    })
+    orphan.db_name, orphan.allele, orphan.case = "IGHV9-99*DEL", "DEL", "case_XTRA_EUR"
+    orphan.db_name_AA, orphan.db_name_AA_list = None, "IGHV9-99*01"
+    db.session.add(orphan)
+    db.session.flush()
+
+    assert create_frequencies_table("IGHV9-99*01", "aminoacid") is None
+
+
+def test_the_amino_acid_lookups_404_a_name_they_cannot_resolve(client):
+    # Both used to answer 200 with an empty body - {} and {"aa_allele_list": null} - while
+    # every sibling on the blueprint 404s. The frontend reads them through
+    # getJson(url, fallback), which turns a rejected request into the same fallback the empty
+    # body produced, so the answer is unchanged for the only caller there is.
+    for endpoint, param in (("/data/aminoacidalleles", "aa_allele_name"),
+                            ("/data/aminoacidlist", "aa_allele_name")):
+        assert get(client, url(endpoint, **{param: TEST_ALLELE})).status_code == 200
+        for absent in ("IGHV9-99*99", TEST_ALLELE + "_F1", "IGHD1-1*01"):
+            res = get(client, url(endpoint, **{param: absent}))
+            assert res.status_code == 404, f"{endpoint} answered for {absent}"
 
 
 def test_aminoacidfrequencies_table_gene(client):
@@ -428,3 +692,105 @@ def test_gene_tables_list_each_allele_once(client):
         "IGHV3-30*01": 30,
         TWO_GENE_ALLELE: 30,
     }
+
+
+def test_openapi_spec_options_are_not_shared_between_apps(monkeypatch):
+    # from_object copies the config class attribute by reference, and apispec's to_dict()
+    # ends by deep-merging the spec it just built into it. Shared, the first app's schemas
+    # accumulated there and won for every app built afterwards in the process.
+    from app import create_app
+    from config import TestConfig
+
+    # Neither app is the server and neither has a schema; only the generated spec is read.
+    monkeypatch.setenv("SKIP_DATA_LOAD", "1")
+    first, second = create_app(TestConfig), create_app(TestConfig)
+    assert first.config["API_SPEC_OPTIONS"] is not second.config["API_SPEC_OPTIONS"]
+
+    with first.test_client() as client:
+        client.get("/openapi.json")
+
+    assert sorted(TestConfig.API_SPEC_OPTIONS["components"]) == ["securitySchemes"], \
+        "the config class attribute accumulated a built spec"
+
+
+def test_health_is_documented_as_needing_no_api_key(client):
+    # The requirement is declared at document root so every operation inherits it, but this
+    # route has no api_key_required. Anyone wiring a Kubernetes probe from the spec would
+    # build it to send a header it does not need.
+    spec = get(client, "/openapi.json").get_json()
+    assert spec["paths"]["/health"]["get"]["security"] == []
+    assert client.get("/health").status_code == 200
+
+
+def test_unknown_fasta_type_and_plot_type_raise(app):
+    # Both chose on the argument with if/elif and no else: the fasta branches left
+    # distinct_sequences unassigned and failed with UnboundLocalError, and the frequency
+    # table silently treated anything unrecognised as amino acid, answering 200 with a
+    # header-only tsv for a full gene.
+    from services.fasta_generation import generate_fasta
+    from services.frequencies import create_frequencies_table
+
+    with pytest.raises(ValueError, match="unknown fasta type"):
+        generate_fasta(TEST_GENE, type="genomicc")
+    with pytest.raises(ValueError, match="unknown plot_type"):
+        create_frequencies_table(TEST_GENE, "genomicc", full_gene=True)
+
+
+def test_empty_plot_selection_is_not_an_error(client):
+    # Nothing chosen yet is a legitimate state, not a malformed request. The frontend sends
+    # an empty selection on first load and whenever a selection is reset, so requiring at
+    # least one character turned both into a 422 that getJson quietly swallowed.
+    for u in ("/data/plotoptions?current_selection=", "/data/plotoptions"):
+        res = get(client, u)
+        assert res.status_code == 200, f"{u} returned {res.status_code}"
+        assert res.get_json() == []
+
+    # A real selection is unaffected.
+    assert get(client, url("/data/plotoptions", current_selection="IGHV")).status_code == 200
+
+
+def test_aminoacid_table_resolves_the_master_allele(app):
+    # The frontend asks for this table by *genomic* allele name - that is what it resolved
+    # from the plot selection - so it has to be translated to the master amino acid allele it
+    # collapses into. 243 of the 732 plottable alleles are not their own master, and checking
+    # the cache before resolving made every one of them a 404.
+    from services.frequencies import create_frequencies_table
+
+    # IGHV1-8*02 and *04 both collapse into IGHV1-8*01 in the mock data.
+    for genomic in (TEST_ALLELE, "IGHV1-8*02", "IGHV1-8*04"):
+        table = create_frequencies_table(genomic, "aminoacid")
+        assert table is not None, f"no amino acid table for {genomic}"
+        assert TEST_ALLELE in table, f"{genomic} did not resolve to its master"
+
+    # A *DEL has no amino acid master, and a non-plottable allele none either.
+    assert create_frequencies_table("IGHV1-8*DEL", "aminoacid") is None
+    assert create_frequencies_table("IGHD1-1*01", "aminoacid") is None
+
+
+def test_alignment_covers_only_the_plotted_loci(client):
+    # repositories/filters.py says IGHD and IGHJ must never be offered as a plot or
+    # alignment selection, and this was the one query in that family without the locus
+    # restriction. Handed no sequences, MAFFT also produced one blank record rather than
+    # nothing, so the answer was 200 with a row of empty strings.
+    assert get(client, url("/data/sequences/alignedsequences", gene_name=TEST_GENE)).status_code == 200
+
+    for absent in ("IGHD1-1", "IGHJ6", "IGHV9-99"):
+        res = get(client, url("/data/sequences/alignedsequences", gene_name=absent))
+        assert res.status_code == 404, f"aligned {absent}, which no plot offers"
+
+
+
+def test_the_preload_replaces_rather_than_merges(app):
+    # target.update() alone left alleles from an earlier load sitting alongside the new ones.
+    # The dictionaries are module-level and shared by name, so they are cleared in place
+    # rather than rebound - and the invariant belongs here, not in the test fixture.
+    from constants import allele_superpopulation_frequencies
+    from loaders import load_plot_data_to_dict
+
+    before = len(allele_superpopulation_frequencies)
+    allele_superpopulation_frequencies["STALE*99"] = [{"population": "AFR", "n": 0, "frequency": 0.0}]
+
+    load_plot_data_to_dict()
+
+    assert "STALE*99" not in allele_superpopulation_frequencies
+    assert len(allele_superpopulation_frequencies) == before

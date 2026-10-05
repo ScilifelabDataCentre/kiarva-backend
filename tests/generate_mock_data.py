@@ -211,8 +211,14 @@ def mock_rows():
             sequence="CAGGTCCAGCTGGTGCAGTCTGGGGCTGAGGTGAAGAAGCCTGGGTCCTCGGTGAAGGTC",
             prefix="AGGTGTCCAGTCC",
             suffix="CACAGTGTGAAA",
-            score="4.0",
-            snps="rs11417200(C:77,107170005);",
+            # A score with no SNPs at all. This is the majority shape in the real data -
+            # 209,867 rows against 216,496 with both set - because the score counts
+            # uncommon SNPs, so 0.0 means there were none to list and the column is
+            # empty. The loader stores that empty column as NULL, which is what taking
+            # len() of it used to choke on. No real row has a score above 0.0 with no
+            # SNPs, so the score here is 0.0 to match.
+            score="0.0",
+            snps="",
             aa_allele="IGHV1-69*04_S7754",
             aa_list="IGHV1-69*04_S7754",
             aa_sequence="QVQLVQSGAEVKKPGSSVKV",
