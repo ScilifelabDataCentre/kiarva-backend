@@ -12,4 +12,4 @@ echo "Starting setup..."
 # the TSVs and validates them, and a missing table there is the error it should be.
 SKIP_DATA_LOAD=1 flask db upgrade
 echo "Done with DB upgrade. Starting Gunicorn..."
-exec gunicorn --bind 0.0.0.0:5000 'app:create_app()' --access-logfile - --access-logformat '%(h)s - - [%(t)s] %(r)s %(s)s %(b)s'
+exec gunicorn --config gunicorn.conf.py
