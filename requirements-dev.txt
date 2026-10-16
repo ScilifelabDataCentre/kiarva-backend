@@ -4,7 +4,7 @@
 -r requirements.txt
 
 iniconfig==2.3.0
-pluggy==1.6.0
+pluggy==1.7.0
 Pygments==2.21.0
 pytest==9.1.1
 pytest-env==1.7.1
