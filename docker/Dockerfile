@@ -1,4 +1,4 @@
-FROM python:3.14
+FROM python:3.15
 
 ENV PYTHONUNBUFFERED=1
 # Set explicitly rather than relying on .flaskenv, which the Flask CLI only
