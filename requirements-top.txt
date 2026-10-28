@@ -13,5 +13,5 @@ gunicorn==26.2.0
 pyzipper==0.4.0
 
 # Development and CI only (locked in requirements-dev.txt)
-pytest==9.1.1
+pytest==9.2.0
 pytest-env==1.7.1
