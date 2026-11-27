@@ -23,7 +23,7 @@ jobs:
           tar xzf mafft-7.525-with-extensions-src.tgz
           cd mafft-7.525-with-extensions/core && \
           make clean && \
-          make -j1 && \
+          make -j1 CFLAGS="-O3 -std=gnu17" && \
           sudo make install
       - name: Run unit tests
         run: python -m pytest --import-mode=append tests/

@@ -13,10 +13,10 @@ Jinja2==3.1.6
 Mako==1.4.3
 MarkupSafe==3.0.4
 marshmallow==4.4.0
-packaging==26.3
+packaging==26.4
 pycryptodomex==3.24.2
 pyzipper==0.4.0
-SQLAlchemy==2.1.8
+SQLAlchemy==2.1.9
 typing_extensions==4.16.0
 webargs==8.7.1
 Werkzeug==3.1.9
