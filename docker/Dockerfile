@@ -24,7 +24,7 @@ RUN sed -i 's|^PREFIX = .*|PREFIX = /app/mafft/local|' mafft-7.525-with-extensio
 
 RUN cd mafft-7.525-with-extensions/core && \
     make clean && \
-    make -j1 && \
+    make -j1 CFLAGS="-O3 -std=gnu17" && \
     make install
 
 # Ensure MAFFT_BINARIES is unset
